@@ -12,13 +12,12 @@
 """
 
 import hashlib, string, random, sys, os, re, imp, inspect
-from guppy import hpy
-h=hpy()
+
 
 """
 	Generates a valid HMAC challenge string using 
 	random.sample on a list of allowed characters.
-	Remotes = from the list of allowed since it is
+	Removes = from the list of allowed since it is
 	used to distinguish key from value in the CAPAB
 	output.
 """
@@ -50,7 +49,7 @@ class UIDGenerator:
 	
 	"""
 	Converts a base 10 integer into a base len(uppercase + digits) 
-	string, then pads it to 6 characters if required.
+	string, then pads it to n characters if required.
 	"""
 	@classmethod
 	def baseconvert(cls,n,pad=6):
@@ -104,8 +103,9 @@ def contains_any(str, set):
 
 """
 	Wraps a string to a specified length if it is
-	longer than <width> characters, indenting following
-	lines to a certain length.
+	longer than <width> characters, offsetting following
+	lines to a certain length. Shortens the first line
+	by offset so that all lines are of the same width.
 """
 def word_wrap(string, width=80, offset=0):
 	splitpos = []
@@ -142,12 +142,8 @@ def word_wrap(string, width=80, offset=0):
 
 """
 Returns a string containing the name 
-of the function that called the 
-function... calling THIS function. 
-HEH.
-
-CALLING FUNC => CALLING FUNC => THIS FUNC
-		^^^ This guys name.
+of the function depth n which called the
+current function.
 """
 def called_by(depth=1):
 	depth += 1
@@ -171,10 +167,8 @@ def find_classes(package):
 	Returns all functions in a given class,
 	possibly matching a prefix.
 """
-def find_methods(cls,regex=None):
-	if regex:
-		return [name for name, method in inspect.getmembers(cls,inspect.ismethod) if re.match(regex,name) is not None]
-	else:
-		return [name for name, method in inspect.getmembers(cls,inspect.ismethod)]
+def find_methods(cls,regex=r'.*'):
+	return [name for name, method in inspect.getmembers(cls,inspect.ismethod) if re.match(regex,name) is not None]
+	
 	
 	
