@@ -154,9 +154,9 @@ class SQLExtension(ext.BaseExtension):
             self.log.log(cll.level.ERROR,'Did not receive expected args from main method.')
             return 
         
-    
+        cfg = self.receiver.factory.cfg.sqlextension
         self.db.runOperation(
-                            "UPDATE " + self.receiver.factory.cfg.sqlextension.table_prefix + "_users SET last_quit = NOW(), last_quit_message = %s WHERE id = %s LIMIT 1", 
+                            "UPDATE " + cfg.table_prefix + "_users SET last_quit = NOW(), last_quit_message = %s WHERE id = %s LIMIT 1", 
                             [kwargs.get('reason'),user.db_id]
                             ).addCallbacks(self.query_update_callback,self.query_error_callback)
         
@@ -195,17 +195,21 @@ class SQLExtension(ext.BaseExtension):
         Returns a deferred for use with callbacks.
     """
     def get_user(self,name):
+        # We always set cfg as a local variable before the query for ease of use, but 
+        # it *CANNOT* be a class wide thing because then config rehashes would not be 
+        # propagated correctly
+        cfg = self.receiver.factory.cfg.sqlextension
         return self.db.runQuery(
                             " SELECT"
                             " r.id as db_id, r.level as db_level, r.approved as db_approved,"
                             " (SELECT"
                                 " GROUP_CONCAT(c.name SEPARATOR ',')"
                                 " FROM " 
-                                    " " + self.receiver.factory.cfg.sqlextension.table_prefix + "_user_autojoin a,"
-                                    " " + self.receiver.factory.cfg.sqlextension.table_prefix + "_channels c"
+                                    " " + cfg.table_prefix + "_user_autojoin a,"
+                                    " " + cfg.table_prefix + "_channels c"
                                 " WHERE a.user_id = r.id AND a.channel_id = c.id ORDER BY c.name ASC"
                             " ) as autojoin"
-                            " FROM " + self.receiver.factory.cfg.sqlextension.table_prefix + "_users r"
+                            " FROM " + cfg.table_prefix + "_users r"
                             " WHERE username = %s LIMIT 1",name
                             )
             
@@ -372,19 +376,21 @@ class SQLExtension(ext.BaseExtension):
         
     
     def get_channel_modes(self,name):
+        cfg = self.receiver.factory.cfg.sqlextension
         return self.db.runQuery \
             (
             
                 " SELECT "
                     " m.id as db_id, m.mode as db_mode, m.value as db_value"
-                " FROM " + self.receiver.factory.cfg.sqlextension.table_prefix + "_channels c" 
-                " INNER JOIN " + self.receiver.factory.cfg.sqlextension.table_prefix + "_channel_modes m"
+                " FROM " + cfg.table_prefix + "_channels c" 
+                " INNER JOIN " + cfg.table_prefix + "_channel_modes m"
                 " ON (c.id = m.channel_id)"
                 " WHERE c.name = %s LIMIT 1",name
                 
             )
                         
     def get_channel(self,name):	
+        cfg = self.receiver.factory.cfg.sqlextension
         return self.db.runQuery \
             (
             
@@ -394,21 +400,22 @@ class SQLExtension(ext.BaseExtension):
                     " c.level_voice as db_level_voice, c.level_halfop as db_level_halfop,"
                     " c.level_op as db_level_op, c.level_superop as db_level_superop,"
                     " u.username as db_founder_name" 
-                " FROM " + self.receiver.factory.cfg.sqlextension.table_prefix + "_channels c" 
-                " LEFT JOIN " + self.receiver.factory.cfg.sqlextension.table_prefix + "_users u"
+                " FROM " + cfg.table_prefix + "_channels c" 
+                " LEFT JOIN " + cfg.table_prefix + "_users u"
                 " ON (c.founder_id = u.id)"
                 " WHERE c.name = %s LIMIT 1",name
                 
             )
 
     def get_channel_access_list(self,name):
+        cfg = self.receiver.factory.cfg.sqlextension
         return self.db.runQuery \
             (
             
                 " SELECT "
                     " a.user_id, a.access_level"
-                " FROM " + self.receiver.factory.cfg.sqlextension.table_prefix + "_channel_access a," 
-                " " + self.receiver.factory.cfg.sqlextension.table_prefix + "_channels c" 
+                " FROM " + cfg.table_prefix + "_channel_access a," 
+                " " + cfg.table_prefix + "_channels c" 
                 " WHERE c.name = %s AND c.id = channel_id ORDER BY a.access_level DESC",name
                 
             )       
@@ -556,10 +563,11 @@ class SQLExtension(ext.BaseExtension):
                 if not self.receiver.factory.is_bursting:
                     self.receiver.st_send_command('NOTICE',[user_uid.uid],self.enforcer.uid,'Welcome %s! Your current global access level is %s.' % (user_uid.nick,user_uid.db_level))
                     
+                cfg = self.receiver.factory.cfg.sqlextension
                 self.db.runOperation \
                     (
                     
-                        " UPDATE " + self.receiver.factory.cfg.sqlextension.table_prefix + "_users"
+                        " UPDATE " + cfg.table_prefix + "_users"
                         " SET ip = %s, last_login = %s WHERE id = %s LIMIT 1", 
                         [user_uid.ip,user_uid.timestamp,user_uid.db_id]
                         
@@ -688,10 +696,10 @@ class SQLExtension(ext.BaseExtension):
             channel.db_level_superop = new_level
             db_field = 'level_superop'
             
-            
+        cfg = self.receiver.factory.cfg.sqlextension
         self.db.runOperation \
             (
-                "UPDATE " + self.receiver.factory.cfg.sqlextension.table_prefix + "_channels SET " + db_field + " = %s WHERE id = %s LIMIT 1", 
+                "UPDATE " + cfg.table_prefix + "_channels SET " + db_field + " = %s WHERE id = %s LIMIT 1", 
                 [new_level,channel.db_id]
             ).addCallbacks(level_updated,self.query_error_callback,None,{'chan': channel.uid,'type': type, 'level': new_level})
         
@@ -762,9 +770,10 @@ class SQLExtension(ext.BaseExtension):
 
         channel.db_type = new_type.upper()
         
+        cfg = self.receiver.factory.cfg.sqlextension
         self.db.runOperation \
             (
-                "UPDATE " + self.receiver.factory.cfg.sqlextension.table_prefix + "_channels SET type = %s WHERE id = %s LIMIT 1", 
+                "UPDATE " + cfg.table_prefix + "_channels SET type = %s WHERE id = %s LIMIT 1", 
                 [channel.db_type,channel.db_id]
             ).addCallbacks(type_updated,self.query_error_callback,None,{'chan': channel.uid,'type': channel.db_type})
         
