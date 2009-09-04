@@ -133,6 +133,8 @@ class Channel(Unique):
         self.topic_time = 0
         self.topic_set_by = ''
         
+        self.access = {}
+        
         self._timestamp = datetime.today()
         
         self._users = {}

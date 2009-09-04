@@ -50,8 +50,11 @@ class ConsoleInteraction(LineOnlyReceiver):
         line = line.strip()
         
         if not line and self.factory.connected:
-            self.prompt()
-            self.ready_for_cmd = True
+            if not self.ready_for_cmd:
+                self.prompt()
+                self.ready_for_cmd = True
+            else:
+                self.ready_for_cmd = False
             return
             
         elif self.ready_for_cmd and line.upper() == 'RAW':
@@ -66,10 +69,13 @@ class ConsoleInteraction(LineOnlyReceiver):
 
             self.issueCommand(line)
             self.raw = False
-            self.ready_for_cmd = False
+            self.ready_for_cmd = True
+            self.prompt()
         else:
-            self.ready_for_cmd = not self.handleCommand(line)
+            self.ready_for_cmd = self.handleCommand(line)
         
+            if self.ready_for_cmd:
+                self.prompt()
         
     def handleCommand(self,line):
     
@@ -112,11 +118,26 @@ class ConsoleInteraction(LineOnlyReceiver):
         if cmd == 'RELOAD':
             cfg_file = self.factory.reload_config()
             self.log.log(cll.level.INFO,'Reloaded config from %s' % cfg_file)
+            return True
         else:
             return False
             
     def con_log(self,cmd,tokens):
-        if cmd == 'TOGGLE':
+        if cmd == 'OFF':
+            if self.logging:
+                self.logging = False
+                self.transport.write('Logging %s.' % colour.format_colour(colour.RED,'Disabled') + self.delimiter)
+                self.log.log(cll.level.INFO,'Logging turned off by console')
+                logging.disable(500)
+                
+        elif cmd == 'ON':
+            if not self.logging:
+                logging.disable(0)
+                self.transport.write('Logging %s.' % colour.format_colour(colour.GREEN,'Enabled') + self.delimiter)
+                self.log.log(cll.level.INFO,'Logging turned on by console')
+                self.logging = True
+            
+        elif cmd == 'TOGGLE':
             if self.logging:
                 self.transport.write('Logging %s.' % colour.format_colour(colour.RED,'Disabled') + self.delimiter)
                 self.log.log(cll.level.INFO,'Logging turned off by console')
@@ -132,6 +153,7 @@ class ConsoleInteraction(LineOnlyReceiver):
         else:
             return False
     
+    
     def con_list(self,cmd,tokens):
         if cmd.startswith('UID'):
             list = colour.format_colour(colour.YELLOW,"UID's: ") + ', '.join(self.factory.uid)
@@ -139,8 +161,8 @@ class ConsoleInteraction(LineOnlyReceiver):
         elif cmd.startswith('USER'):
             list = colour.format_colour(colour.YELLOW,"USERS: ") + ', '.join([user.nick for user in self.factory.uid.values() if isinstance(user,uid.User)])
         
-        elif cmd.startswith('CHANNEL'):
-            list = colour.format_colour(colour.YELLOW,"CHANNELS: ") + ', '.join([channel.name for channel in self.factory.uid.values() if isinstance(channel,uid.Channel)])
+        elif cmd.startswith('CHAN'):
+            list = colour.format_colour(colour.YELLOW,"CHANNELS: ") + ', '.join([channel.uid for channel in self.factory.uid.values() if isinstance(channel,uid.Channel)])
             
         else:
             self.transport.write(colour.format_colour(colour.RED,'Unknown list type %s' % (cmd)) + self.delimiter)
@@ -153,12 +175,12 @@ class ConsoleInteraction(LineOnlyReceiver):
     def con_quit(self,subcmd,tokens):
         self.log.log(cll.level.WARNING,'Server exit forced by console QUIT!')
         self.connector.transport.protocol.quit()
-        return True
+        return False
         
     def con_unknown(self,line,cmd,subcmd,tokens):
         self.transport.write(colour.format_colour(colour.RED,'Unknown command %s' % (line)) + self.delimiter)
         self.prompt()
-        return False
+        return True
         
     def issueCommand(self, command):
         # write to the connector's transport, not the one writing on stdout

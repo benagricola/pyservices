@@ -1,0 +1,124 @@
+server:
+{
+    name: 			'services.hello-kitty.com'
+    description:  	'Hello Kitty Services'
+    sid:  			'00A'
+}
+
+
+peer_server:
+{
+    address:		'127.0.0.1'
+    port:			5007
+    name:			'irc.hello-kitty.com'
+    send_password:	'send_password'
+    rcv_password: 	'receive_password'
+    protocol: 		$capabilities.protocol # References the below capabilities.protocol field
+}
+
+console:
+{
+    enable_input: True
+}
+
+logging:
+{
+    rotate: '7d'
+    location: './services.log'
+    console_format: '%(asctime)-23s $BOLD%(name)-12s$RESET %(levelname)-19s $RESET%(message)s'
+    console_max_width: 150
+    console_multiline_offset: 49
+    file_format: '%(asctime)s %(name)s %(levelname)s %(message)s'
+}
+
+ping:
+{
+    initiate_after:	120
+    timeout_after:	120
+}
+
+
+reconnect:
+{
+    max_delay: 		300
+    initial_delay:	5
+    factor_incr:	1.5
+}
+
+sqlextension:
+{
+    db_name: 		'database_name'
+    db_username: 	'database_username'
+    db_password:	'database_password'
+    db_host:		'localhost'
+    db_port:		3306
+    table_prefix:	'ircd' #eg ircd_users, ircd_channels etc
+    
+    services:
+    {
+        global_status_messages: 	True
+        global_status_disconnect:	'[SERVICES] Going down in a sec. Back soon! :3'
+        global_status_connect:		'[SERVICES] All back online now. Missed you!'
+        
+        enforcer:
+        {
+            nick:		'Enforcer'
+            host:		'security.services.hello-kitty.com'
+            ident:		'enforcer'
+            realname:	'The Enforcer'
+            
+            ban_accessdenied_expiry: 600 # Seconds
+        }
+        
+        oper_tool:
+        {
+            nick:		'OperServ'
+            host:		'operations.services.hello-kitty.com'
+            ident:		'operserv'
+            realname:	'Operator Tools'
+        }
+        
+        global_announce:
+        {
+            nick:		'Global'
+            host:		'publicity.services.hello-kitty.com'
+            ident:		'global'
+            realname:	'Network Wide Announcer'
+        }
+    }
+}
+
+# Generally do not touch these, they're for debug / compatibility only
+capabilities:
+{
+    protocol: 		1201
+    ip6native: 		0
+    ip6support: 	1
+    nickmax: 		32
+    halfop: 		1
+    chanmax: 		65
+    maxmodes: 		20
+    identmax: 		12
+    maxquit: 		256
+    maxtopic: 		308
+    maxkick:		256
+    maxgecos:		129
+    maxaway:		20
+    prefix:			'(qaohv)~&@%+'
+    chanmodes:		'beg,k,FLfjl,DMNOPRScimnprstz'
+    svspart:		1
+}
+
+# Same here 
+modules:
+{
+}
+
+debug:
+{
+    profile:
+    {
+        enabled:	False
+        file:		'./profile.prof'
+    }
+}
