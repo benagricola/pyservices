@@ -49,7 +49,6 @@ class SpanningTree12(LineOnlyReceiver):
         self.log.log(cll.level.INFO,'Connection accepted on port %s' % (self.factory.cfg.peer_server.port))
         self.factory.resetDelay()
         self.log.log(cll.level.VERBOSE,'Inserting custom hooks')
-        self.insert_extensions()
         
         
         self.execute_hook()
@@ -101,35 +100,6 @@ class SpanningTree12(LineOnlyReceiver):
     """
     def connectionFailed(self,reason):
         self.log.log(cll.level.ERROR,reason.value)
-
-    
-    
-    """
-        This function creates instances of all 'Extension' classes
-        that exist in the 'extensions' directory.
-        They are created automagically if they subclass the correct
-        BaseExtension type from common.ext.BaseExtension, with the
-        current Receiver object as the only argument.
-    """
-    def insert_extensions(self):
-        imp = []
-        for name, extclass in tools.find_classes('extensions'):
-            if issubclass(extclass,ext.BaseExtension):
-                imp.append(name)
-                extclass(self)
-        
-        self.log.log(cll.level.VERBOSE,'Loaded %s' % ', '.join(imp))
-    
-    """
-        Appends a hook on the given function name by appending
-        it to the list of functions to be called when the function
-        calls its' hook name.
-    """
-    def add_hook(self,hookname,ext):
-        h = self.factory.hook.get(hookname,[])
-        h.append(ext)
-        
-        self.factory.hook[hookname] = h
         
     """
         Execute the hook functions defined for this functions'
@@ -146,14 +116,16 @@ class SpanningTree12(LineOnlyReceiver):
 
         try:
             if methodname in self.factory.hook:
+               
+                
                 for ext in self.factory.hook[methodname]:
                     method = getattr(ext,methodname, None)
             
                     if method is not None:
                         # !!! TODO: This *MAY* need changing to allow
                         # !!! the method to run in a separate thread.
-                        if not method(*args,**kwargs):
-                            break
+                        method(*args,**kwargs)
+
                     else:
                         self.log.log(cll.level.ERROR,'Hook method %s in %s does not exist' % (methodname,ext))
                         
@@ -209,7 +181,6 @@ class SpanningTree12(LineOnlyReceiver):
         
         # Check to see if class has a correctly named method 
         # for this command.
-        method = getattr(self, "st_receive_%s" % cmd, None)
         
         try:
                 method = getattr(self, "st_receive_%s" % cmd, None)
@@ -621,7 +592,7 @@ class SpanningTree12(LineOnlyReceiver):
         Sends a fake UID command to introduce a pseudoclient to the network.
         Also creates and adds a User() UID for this client to our UID list.
     """	
-    def st_add_pseudoclient(self,nick,host,ident,modes,gecos,client_handler,cmd_prefix=None):
+    def st_add_pseudoclient(self,nick,host,ident,modes,gecos,client_handler):
         _t = int(time.time())
         
         try:
@@ -638,7 +609,6 @@ class SpanningTree12(LineOnlyReceiver):
         _user.ident = ident
         _user.ip = '127.0.0.1'
         _user.signed_on = _t
-        _user.cmd_prefix = cmd_prefix
     
         _user.modes = self.seperate_modes(_modes,_params,_user)
         _user.gecos = gecos
@@ -1202,9 +1172,9 @@ class SpanningTree12(LineOnlyReceiver):
                 cprefix = _sr.get('message')
                 _sr['message'] = ''
                 
-            ps = self.factory.pseudoclients[_sr.get('uid')][1]
+        
             
-            if not self.execute_hook(name='ps_%s_privmsg_%s' % (ps.cmd_prefix.lower(),cprefix.lower()),source_uid=prefix,command=cprefix,message=_sr.get('message'),pseudoclient_uid=_sr.get('uid')):
+            if not self.execute_hook(name='ps_privmsg_%s' % (cprefix.lower()),source_uid=prefix,command=cprefix,message=_sr.get('message'),pseudoclient_uid=_sr.get('uid')):
                 self.st_receive_privmsg_unknown(source=prefix,command=cprefix,message=_sr.get('message'),pseudoclient_uid=_sr.get('uid'))
         
         else:
