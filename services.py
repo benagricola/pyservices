@@ -59,6 +59,7 @@ class SpanningTreeFactory(ReconnectingClientFactory):
         non-static values.
     """
     def __init__(self, cfg,config_file):
+        self.connector = None
         self.cfg = cfg
         self.config_file = config_file
         self.maxDelay = self.cfg.reconnect.max_delay
@@ -73,6 +74,8 @@ class SpanningTreeFactory(ReconnectingClientFactory):
         self.log = logging.getLogger('ST_FACTORY')
         self.log.log(cll.level.INFO,'Starting Spanning Tree')
     
+        
+        
     
     def reload_config(self):
         self.cfg = config.Config(file(self.config_file))
@@ -86,7 +89,7 @@ class SpanningTreeFactory(ReconnectingClientFactory):
         tools.hmac_challenge_string() which is 
         placed into the capabilities dictionary.
     """
-    def startedConnecting(self, connector):
+    def startedConnecting(self, connector): 
         self.log.log(cll.level.INFO,'Connecting to %s:%s' % (self.cfg.peer_server.address, self.cfg.peer_server.port))
 
         # Generate a new HMAC challenge on every connection attempt
@@ -126,6 +129,45 @@ class SpanningTreeFactory(ReconnectingClientFactory):
         self.prefix = {}
         
         
+    """
+        This function creates instances of all 'Extension' classes
+        that exist in the 'extensions' directory.
+        They are created automagically if they subclass the correct
+        BaseExtension type from common.ext.BaseExtension, with the
+        current Receiver object as the only argument.
+    """
+    def insert_extensions(self,connector):
+        imp = []
+        for name, extclass in tools.find_classes('extensions'):
+            if issubclass(extclass,ext.BaseExtension):
+                imp.append(name)
+                extclass(connector)
+        
+        self.log.log(cll.level.INFO,'Loaded %s' % ', '.join(imp))
+    
+    """
+        Appends a hook on the given function name by appending
+        it to the list of functions to be called when the function
+        calls its' hook name.
+    """
+    def add_hook(self,hookname,ext):
+        h = self.hook.get(hookname,[])
+        h.append(ext)
+        
+        self.hook[hookname] = h
+        
+    
+    """ 
+        Override factory buildprotocol to allow insertion of
+        extensions into the protocol object.
+    """
+    def buildProtocol(self,addr):
+        p = self.protocol()
+        p.factory = self
+        
+        self.insert_extensions(p)
+
+        return p
         
     """
         Called when the factory client has lost
@@ -217,6 +259,7 @@ def main():
     if cfg.console.enable_input:
         stdio_handler = consoleinteraction.ConsoleInteraction(cfg,config_file,initiate_spanningtree)
         chandler = stdio.StandardIO(stdio_handler)
+        
     else:
         initiate_spanningtree(cfg,config_file)
         
@@ -260,7 +303,7 @@ def main():
 def initiate_spanningtree(cfg,config_file):
     factory = SpanningTreeFactory(cfg,config_file)
     connector = reactor.connectTCP(cfg.peer_server.address, cfg.peer_server.port, factory)
-    
+
     return (factory,connector)
 
         
