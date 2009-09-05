@@ -40,11 +40,10 @@ class SQLEnforcer(ext.BaseExtension):
     def st_send_burst(self):
         cfg_enforcer = self.factory.cfg.sqlextension.services.enforcer
         #cfg_oper_tool = self.factory.cfg.sqlextension.services.oper_tool
-        #cfg_global_announce = self.factory.cfg.sqlextension.services.global_announce
+
         
         self.enforcer = self.protocol.st_add_pseudoclient(cfg_enforcer.nick,cfg_enforcer.host,cfg_enforcer.ident,'+iow',cfg_enforcer.realname,self)
         #self.oper_tool = self.protocol.st_add_pseudoclient(cfg_oper_tool.nick,cfg_oper_tool.host,cfg_oper_tool.ident,'+iow',cfg_oper_tool.realname,self,'oper')
-        #self.global_announce = self.protocol.st_add_pseudoclient(cfg_global_announce.nick,cfg_global_announce.host,cfg_global_announce.ident,'+iow',cfg_global_announce.realname,self,'global')
         
         
     """
@@ -59,8 +58,6 @@ class SQLEnforcer(ext.BaseExtension):
 
         self.protocol.st_send_command('SVSMODE',[channel.uid,'-b',banmask],self.enforcer.uid)
         self.log.log(cll.level.DEBUG,'Unbanned %s on %s (Timeban Expiry)' % (banmask,channel.uid))
-        
-        
         
         
     """
@@ -86,8 +83,6 @@ class SQLEnforcer(ext.BaseExtension):
             self.factory.pending_users.get(user.uid).addCallback(getattr(self,tools.called_by(0)),**kwargs)
             return
 
-        
-
         if user.db_id == channel.db_founder_id:
             effective_level = 100
 
@@ -98,8 +93,7 @@ class SQLEnforcer(ext.BaseExtension):
         else:
              effective_level = user.db_id
         
-       
-        
+
         # First check if users' level is equal or more
         # than the minimum level for this channel, otherwise
         # remove them if the channel is not public
@@ -175,9 +169,7 @@ class SQLEnforcer(ext.BaseExtension):
         if not channel or not users:
             return 
     
-        
-       
-        
+
         # Check if channel has a founder first 
         if not hasattr(channel,'db_founder_id'):
             # Channel is not registered, we don't care.
@@ -222,8 +214,7 @@ class SQLEnforcer(ext.BaseExtension):
         
     def st_receive_uid(self,**kwargs):
         user = kwargs.get('user')
-        
-        
+      
         if not user:
             self.log.log(cll.level.ERROR,'Did not receive expected args from main method.')
             return 
@@ -236,8 +227,6 @@ class SQLEnforcer(ext.BaseExtension):
         self.user_trigger_welcome(user=user)
         
         
-                
-    
     def user_trigger_welcome(self,*args,**kwargs):
         user = kwargs.get('user')
         if user:
@@ -252,9 +241,7 @@ class SQLEnforcer(ext.BaseExtension):
                 
         return True
           
-
-            
-            
+     
     def ps_privmsg_chanlevel(self,command,message,pseudoclient_uid,source_uid):
         """
     Usage:          CHANLEVEL #channel MIN|VOICE|HOP|OP|SOP <1-100> 
@@ -373,8 +360,7 @@ class SQLEnforcer(ext.BaseExtension):
         
         return False
         
-        
-            
+             
     def ps_privmsg_help(self,command,message,pseudoclient_uid,source_uid):
         """
     Usage:          HELP [COMMAND]
@@ -409,6 +395,7 @@ class SQLEnforcer(ext.BaseExtension):
                 self.protocol.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,' ' + cmd_name)
         
         return True
+        
         
     def ps_privmsg_chantype(self,command,message,pseudoclient_uid,source_uid):
         """

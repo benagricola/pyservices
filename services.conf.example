@@ -88,6 +88,15 @@ sqlextension:
     }
 }
 
+# Defines load order and extensions to load. ORDER IS IMPORTANT.
+extensions:
+[
+    'SQLExtension',
+    'SQLEnforcer',
+    'SQLGlobal'
+    'SQLOper'
+]
+
 # Generally do not touch these, they're for debug / compatibility only
 capabilities:
 {

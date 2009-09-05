@@ -138,12 +138,25 @@ class SpanningTreeFactory(ReconnectingClientFactory):
     """
     def insert_extensions(self,connector):
         imp = []
-        for name, extclass in tools.find_classes('extensions'):
-            if issubclass(extclass,ext.BaseExtension):
+        nmp = []
+      
+        avail_ext = dict(tools.find_classes('extensions'))
+
+        for name in self.cfg.extensions:
+            ext_l = avail_ext.get(name,None)
+            
+            if not ext_l:
+                nmp.append(name)
+                
+            elif issubclass(ext_l,ext.BaseExtension):
                 imp.append(name)
-                extclass(connector)
+                ext_l(connector)
         
         self.log.log(cll.level.INFO,'Loaded %s' % ', '.join(imp))
+        
+        if nmp:
+            self.log.log(cll.level.WARNING,'Failed to load %s' % ', '.join(nmp))
+            
     
     """
         Appends a hook on the given function name by appending
