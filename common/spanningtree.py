@@ -621,7 +621,7 @@ class SpanningTree12(LineOnlyReceiver):
         Sends a fake UID command to introduce a pseudoclient to the network.
         Also creates and adds a User() UID for this client to our UID list.
     """	
-    def st_add_pseudoclient(self,nick,host,ident,modes,gecos,client_handler):
+    def st_add_pseudoclient(self,nick,host,ident,modes,gecos,client_handler,cmd_prefix=None):
         _t = int(time.time())
         
         try:
@@ -638,13 +638,14 @@ class SpanningTree12(LineOnlyReceiver):
         _user.ident = ident
         _user.ip = '127.0.0.1'
         _user.signed_on = _t
+        _user.cmd_prefix = cmd_prefix
     
         _user.modes = self.seperate_modes(_modes,_params,_user)
         _user.gecos = gecos
         
         self.add_uid(_user)
     
-        self.factory.pseudoclients[_uid] = client_handler
+        self.factory.pseudoclients[_uid] = (client_handler,_user)
         self.st_send_uid_from_user(_user)
         
         return _user
@@ -1201,7 +1202,9 @@ class SpanningTree12(LineOnlyReceiver):
                 cprefix = _sr.get('message')
                 _sr['message'] = ''
                 
-            if not self.execute_hook(name='ps_privmsg_%s' % (cprefix.lower()),source_uid=prefix,command=cprefix,message=_sr.get('message'),pseudoclient_uid=_sr.get('uid')):
+            ps = self.factory.pseudoclients[_sr.get('uid')][1]
+            
+            if not self.execute_hook(name='ps_%s_privmsg_%s' % (ps.cmd_prefix.lower(),cprefix.lower()),source_uid=prefix,command=cprefix,message=_sr.get('message'),pseudoclient_uid=_sr.get('uid')):
                 self.st_receive_privmsg_unknown(source=prefix,command=cprefix,message=_sr.get('message'),pseudoclient_uid=_sr.get('uid'))
         
         else:

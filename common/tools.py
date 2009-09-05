@@ -162,13 +162,28 @@ def find_classes(package):
 
     return [inspect.getmembers(__import__(package + '.' + modname,None,None,'*'),inspect.isclass)[0] for modname in files]
     
+ 
+
+def get_docstring(obj,prefix='',cmdname=''):
+    mts = [method for name, method in inspect.getmembers(obj,inspect.ismethod) if name == (prefix + cmdname).lower()]
+
+    if len(mts) > 1:
+        return True
+    elif len(mts) > 0:
+        meth = mts[0]
+        return meth.__doc__
+    else:
+        return False
+    
+       
     
 """
     Returns all functions in a given class,
     possibly matching a prefix.
 """
-def find_methods(cls,regex=r'.*'):
+def find_names(cls,regex=r'.*'):
     return [name for name, method in inspect.getmembers(cls,inspect.ismethod) if re.match(regex,name) is not None]
     
-    
+def find_methods(cls,regex=r'.*'):
+    return [method for name, method in inspect.getmembers(cls,inspect.ismethod) if re.match(regex,name) is not None]
     

@@ -17,7 +17,7 @@ class BaseExtension(object):
     def hook_find(self):
         self.log.log(cll.level.VERBOSE,'Requesting all hooks matching %s in %s...' % (self.default_hook_methods,self.name))
         hooks = []
-        for hook in tools.find_methods(self,self.default_hook_methods):
+        for hook in tools.find_names(self,self.default_hook_methods):
             self.receiver.add_hook(hook,self)
             hooks.append(hook)
         self.log.log(cll.level.VERBOSE,'Requested hooks on %s' % (', '.join(hooks)))	
