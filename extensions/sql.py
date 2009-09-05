@@ -33,6 +33,7 @@ class SQLExtension(ext.BaseExtension):
         self.pending_channels = {}
         self.pending_users = {}
         
+
         super(SQLExtension, self).__init__(receiver)
         
         try:
@@ -71,9 +72,9 @@ class SQLExtension(ext.BaseExtension):
         cfg_oper_tool = self.receiver.factory.cfg.sqlextension.services.oper_tool
         cfg_global_announce = self.receiver.factory.cfg.sqlextension.services.global_announce
         
-        self.enforcer = self.receiver.st_add_pseudoclient(cfg_enforcer.nick,cfg_enforcer.host,cfg_enforcer.ident,'+iow',cfg_enforcer.realname,self)
-        self.oper_tool = self.receiver.st_add_pseudoclient(cfg_oper_tool.nick,cfg_oper_tool.host,cfg_oper_tool.ident,'+iow',cfg_oper_tool.realname,self)
-        self.global_announce = self.receiver.st_add_pseudoclient(cfg_global_announce.nick,cfg_global_announce.host,cfg_global_announce.ident,'+iow',cfg_global_announce.realname,self)
+        self.enforcer = self.receiver.st_add_pseudoclient(cfg_enforcer.nick,cfg_enforcer.host,cfg_enforcer.ident,'+iow',cfg_enforcer.realname,self,'en')
+        self.oper_tool = self.receiver.st_add_pseudoclient(cfg_oper_tool.nick,cfg_oper_tool.host,cfg_oper_tool.ident,'+iow',cfg_oper_tool.realname,self,'oper')
+        self.global_announce = self.receiver.st_add_pseudoclient(cfg_global_announce.nick,cfg_global_announce.host,cfg_global_announce.ident,'+iow',cfg_global_announce.realname,self,'global')
         
     
     """
@@ -575,8 +576,8 @@ class SQLExtension(ext.BaseExtension):
                     
         return None
         
-        
-    def ps_privmsg_global(self,source_uid,command,message,pseudoclient_uid):
+
+    def ps_oper_privmsg_global(self,source_uid,command,message,pseudoclient_uid):
         if pseudoclient_uid == self.oper_tool.uid: 
             source = self.receiver.lookup_uid(source_uid)
         
@@ -589,12 +590,12 @@ class SQLExtension(ext.BaseExtension):
             return True
     
     
-    def ps_privmsg_chanlevel(self,command,message,pseudoclient_uid,source_uid):
+    def ps_en_privmsg_chanlevel(self,command,message,pseudoclient_uid,source_uid):
         """
-            Access: 		FOUNDER ONLY
-            Usage:  		CHANLEVEL #channel MIN|VOICE|HOP|OP|SOP <1-100> 
-            Description:	Sets the minimum levels on a channel to be automatically 
-                            granted access, voice, halfop, op, or protected op respectively.
+    Usage:          CHANLEVEL #channel MIN|VOICE|HOP|OP|SOP <1-100> 
+    Access:         FOUNDER ONLY
+    Description:    Sets the minimum levels on a channel to be automatically 
+                    granted access, voice, halfop, op, or protected op respectively.
         """
         
         def usage():
@@ -707,22 +708,61 @@ class SQLExtension(ext.BaseExtension):
         
         return False
         
+        
             
-    def ps_privmsg_chantype(self,command,message,pseudoclient_uid,source_uid):
+    def ps_en_privmsg_help(self,command,message,pseudoclient_uid,source_uid):
         """
-            Access: 		FOUNDER ONLY
-            Usage:  		CHANTYPE #channel [PUBLIC_]USERLEVEL|ACCESSLIST
-            Description:	Sets the type of channel for authentication purposes.
+    Usage:          HELP [COMMAND]
+    Access:         ALL USERS
+    Description:    Returns list of available commands or returns help
+                    documentation for a command if one is specified.
+        """
+        if pseudoclient_uid != self.enforcer.uid:
+            return False
+       
+        
+        if message != '':
+            m = tools.get_docstring(self.__class__,'ps_en_privmsg_',message)
             
-                            USERLEVEL: 	modes + access given to a user are based on their 
-                                        global user level and the CHANLEVEL settings of 
-                                        the named channel.
-                            ACCESSLIST:	modes + access given to a user are based on the 
-                                        access list maintained by the founder of the channel.
-                            PUBLIC_:	Specifying this before either of these two types 
-                                        of channel allows public access to the channel 
-                                        (any level user may join), and only modes given 
-                                        are defined by the channel type.
+            if m is True:
+                self.receiver.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,'There is more than one command matching %s, please be more specific.' % message.upper())
+            elif m is False or m is None:
+                self.receiver.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,'No help for %s available.' % message.upper())
+            
+            elif m is not None:
+                line = m.split('\n')
+                for l in line:
+                    self.receiver.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,l)
+            
+            
+        else:
+            mlist = tools.find_names(self.__class__,r'(?i)^ps_en_privmsg_.+$')
+            
+            self.receiver.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,'The following commands are available by messaging (/msg) %s:' % self.enforcer.nick)
+            for method in mlist:
+                cmd_name = method.split('_').pop().upper()
+                self.receiver.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,' ' + cmd_name)
+        
+        return True
+        
+    def ps_en_privmsg_chantype(self,command,message,pseudoclient_uid,source_uid):
+        """
+    Usage:          CHANTYPE #channel [PUBLIC_]USERLEVEL|ACCESSLIST
+    Access:         FOUNDER ONLY
+    Description:    Sets the type of channel for authentication purposes.
+ 
+ 
+        USERLEVEL:  modes + access given to a user are based on their 
+                    global user level and the CHANLEVEL settings of 
+                    the named channel.
+                    
+        ACCESSLIST: modes + access given to a user are based on the 
+                    access list maintained by the founder of the channel.
+                    
+        PUBLIC_:    Specifying this before either of these two types 
+                    of channel allows public access to the channel 
+                    (any level user may join), and only modes given 
+                    are defined by the channel type.
         """
         
         def usage():
@@ -736,7 +776,9 @@ class SQLExtension(ext.BaseExtension):
             
         def type_updated(*args,**kwargs):
             self.receiver.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,'Channel %s type changed to: %s' % (kwargs.get('chan'),kwargs.get('type')))
-            
+        
+        if pseudoclient_uid != self.enforcer.uid:
+            return
         channel_name = ''
         new_type = ''
         
@@ -782,7 +824,8 @@ class SQLExtension(ext.BaseExtension):
         return False
         
         
-    def ps_privmsg_register(self,source_uid,command,message,pseudoclient_uid):
+    def ps__enprivmsg_register(self,source_uid,command,message,pseudoclient_uid):
+        if pseudoclient_uid != self.enforcer.uid:
+            return
         self.receiver.st_send_command('PRIVMSG',[source_uid.uid],pseudoclient_uid,'Registering %s' % str(message))
         return True
-        
