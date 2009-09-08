@@ -171,7 +171,7 @@ def get_docstring(obj,prefix='',cmdname=''):
         return True
     elif len(mts) > 0:
         meth = mts[0]
-        return meth.__doc__
+        return inspect.getdoc(meth)
     else:
         return False
     
@@ -183,7 +183,7 @@ def get_docstring(obj,prefix='',cmdname=''):
 """
 def find_names(cls,regex=r'.*'):
     return [name for name, method in inspect.getmembers(cls,inspect.ismethod) if re.match(regex,name) is not None]
-    
+
 def find_methods(cls,regex=r'.*'):
     return [method for name, method in inspect.getmembers(cls,inspect.ismethod) if re.match(regex,name) is not None]
     

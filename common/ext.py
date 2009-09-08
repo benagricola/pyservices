@@ -13,6 +13,13 @@ class BaseExtension(object):
         self.name = self.__class__.__name__
         self.log = logging.getLogger(self.name.upper())
         
+        if hasattr(self,'required_extensions'):
+            for i in self.required_extensions:
+                if i not in self.factory.loaded_extensions:
+                    raise RuntimeError('Module required %s which was not loaded' % i)
+                
+        
+        
         self.log.log(cll.level.INFO,'Initializing %s' % self.name)
 
         # Automatically add hooks for any st_ methods

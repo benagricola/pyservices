@@ -28,11 +28,23 @@ from twisted.internet import reactor,defer
 """
 class SQLGlobal(ext.BaseExtension):
     
+    required_extensions = ['SQLExtension']
+    global_announce = None
+        
     def __init__(self,*args,**kwargs):
+
         super(self.__class__, self).__init__(*args,**kwargs)
 
-        
+        if not hasattr(self.factory,'global_announce') or not self.factory.global_announce:
+            self.create_global_announce()
+            
+       
         self.factory.add_hook('quit',self)
+        
+        
+    def create_global_announce(self):
+        cfg_global_announce = self.factory.cfg.sqlextension.services.global_announce
+        self.factory.global_announce = self.protocol.st_add_pseudoclient(cfg_global_announce.nick,cfg_global_announce.host,cfg_global_announce.ident,'+iow',cfg_global_announce.realname,self)
         
         
     """
@@ -41,9 +53,7 @@ class SQLGlobal(ext.BaseExtension):
         network clients for the purposes of services.
     """
     def st_send_burst(self):
-        cfg_global_announce = self.factory.cfg.sqlextension.services.global_announce
-        self.global_announce = self.protocol.st_add_pseudoclient(cfg_global_announce.nick,cfg_global_announce.host,cfg_global_announce.ident,'+iow',cfg_global_announce.realname,self)
-        
+        pass
     
     """
         Hooks into the endburst received during connection
@@ -63,7 +73,7 @@ class SQLGlobal(ext.BaseExtension):
         set in st_send_burst().
     """
     def send_global_notice(self,message):
-        self.protocol.st_send_command('NOTICE',['$*'],self.global_announce.uid,message)
+        self.protocol.st_send_command('NOTICE',['$*'],self.factory.global_announce.uid,message)
     
     
     """
@@ -89,4 +99,3 @@ class SQLGlobal(ext.BaseExtension):
             if 'o' in source.modes and source.oper_type is not None:
                 self.send_global_notice('[%s]: %s' % (source.nick,message))
             return True
-    
