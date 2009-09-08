@@ -115,6 +115,7 @@ class SpanningTree12(LineOnlyReceiver):
             del kwargs['name']
 
         try:
+
             if methodname in self.factory.hook:
                
                 
@@ -124,6 +125,7 @@ class SpanningTree12(LineOnlyReceiver):
                     if method is not None:
                         # !!! TODO: This *MAY* need changing to allow
                         # !!! the method to run in a separate thread.
+                     
                         method(*args,**kwargs)
 
                     else:
@@ -584,7 +586,18 @@ class SpanningTree12(LineOnlyReceiver):
         self.log.log(cll.level.INFO,'Attempting outbound network burst')
         self.st_send_command('BURST',int(time.time()), self.factory.cfg.server.sid)
         self.st_send_command('VERSION',None, self.factory.cfg.server.name,self.factory.server_version)
+
         self.execute_hook()
+        
+        for handler,user in self.factory.pseudoclients.values():
+            # We have to parse the modes here rather than in st_add_pseudoclient because
+            # we do not know which modes the peer server will accept until after the 
+            # CAPAB phase of connection negotiation.
+            _modes,_params = user.unparsed_modes
+            user.modes = self.seperate_modes(_modes,_params,user)
+            
+            self.st_send_uid_from_user(user)
+            
         self.st_send_command('ENDBURST','', self.factory.cfg.server.sid)
         self.log.log(cll.level.INFO,'Outbound network burst completed')
     
@@ -609,14 +622,13 @@ class SpanningTree12(LineOnlyReceiver):
         _user.ident = ident
         _user.ip = '127.0.0.1'
         _user.signed_on = _t
-    
-        _user.modes = self.seperate_modes(_modes,_params,_user)
+        _user.unparsed_modes = (_modes,_params)
+        
         _user.gecos = gecos
         
         self.add_uid(_user)
     
         self.factory.pseudoclients[_uid] = (client_handler,_user)
-        self.st_send_uid_from_user(_user)
         
         return _user
     

@@ -32,10 +32,12 @@ import common.log_levels as cll
 import common.tools as tools
 import common.uid_types as uid
 import common.ext as ext
+import common.reloader as reloader
 
 from common.cmd_types import cmd as cmd
 from common.cmd_types import sr_assoc as sr_assoc
 
+        
 
         
 """ 
@@ -52,7 +54,7 @@ class SpanningTreeFactory(ReconnectingClientFactory):
     """
     modules = []
     capabilities = {}
-    
+    loaded_extensions = []
     
     """ 
         Initiates basic connection attempts and sets
@@ -137,23 +139,46 @@ class SpanningTreeFactory(ReconnectingClientFactory):
         current Receiver object as the only argument.
     """
     def insert_extensions(self,connector):
-        imp = []
+      
+        
         nmp = []
       
         avail_ext = dict(tools.find_classes('extensions'))
 
+        # Clear hooks before loading, if this is a "rehash"
+        # we want the new hooks to take precedence
+        self.hook = {}
+
         for name in self.cfg.extensions:
             ext_l = avail_ext.get(name,None)
-            
+           
             if not ext_l:
                 nmp.append(name)
                 
             elif issubclass(ext_l,ext.BaseExtension):
-                imp.append(name)
-                ext_l(connector)
+
+                try:
+                    # Create the object of this class by reloading the
+                    # module if necessary, then call its init method
+                    # with getattr. This stops it taking multiple 
+                    # reloads for one to take effect.
+                    
+                    mod = reloader.loadreload(ext_l)
+                    ifunc = getattr(mod, name)
+                    ifunc(connector)
+                    
+                except (ImportError, RuntimeError), e:
+                    self.log.log(cll.level.ERROR,'%s' % str(e))
+                    
+                    if name in self.loaded_extensions:
+                        self.loaded_extensions.remove(name)
+                else:
+                    if name not in self.loaded_extensions:
+                        self.loaded_extensions.append(name)
         
-        self.log.log(cll.level.INFO,'Loaded %s' % ', '.join(imp))
+        self.log.log(cll.level.INFO,'Loaded %s' % ', '.join(self.loaded_extensions))
         
+      
         if nmp:
             self.log.log(cll.level.WARNING,'Failed to load %s' % ', '.join(nmp))
             

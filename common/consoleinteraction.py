@@ -154,6 +154,11 @@ class ConsoleInteraction(LineOnlyReceiver):
             return False
     
     
+    def con_reload(self,subcmd,tokens):
+        self.log.log(cll.level.WARNING,'Reloading modules!')
+        self.factory.insert_extensions(self.connector.transport.protocol)
+        
+        
     def con_list(self,cmd,tokens):
         if cmd.startswith('UID'):
             list = colour.format_colour(colour.YELLOW,"UID's: ") + ', '.join(self.factory.uid)

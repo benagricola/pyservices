@@ -27,10 +27,44 @@ from twisted.internet import reactor,defer
     hook into the command delegation process.
 """
 class SQLEnforcer(ext.BaseExtension):
+    required_extensions = ['SQLExtension']
     
     def __init__(self,*args,**kwargs):
         super(self.__class__, self).__init__(*args,**kwargs)
     
+        
+        #cfg_oper_tool = self.factory.cfg.sqlextension.services.oper_tool
+
+        if not hasattr(self.factory,'enforcer') or not self.factory.enforcer:
+            self.create_enforcer()
+
+            
+        #self.oper_tool = self.protocol.st_add_pseudoclient(cfg_oper_tool.nick,cfg_oper_tool.host,cfg_oper_tool.ident,'+iow',cfg_oper_tool.realname,self,'oper')
+        
+   
+    def create_enforcer(self):
+        cfg_enforcer = self.factory.cfg.sqlextension.services.enforcer
+        self.factory.enforcer = self.protocol.st_add_pseudoclient(cfg_enforcer.nick,cfg_enforcer.host,cfg_enforcer.ident,'+iow',cfg_enforcer.realname,self)
+        
+    """ 
+        This method is called when a runOperation callback
+        is required. All it does is debug log that the 
+        query completed successfully.
+    """
+    def query_update_callback(self,*args,**kwargs):
+        self.log.log(cll.level.DATABASE,'Query OK')
+        return True
+    
+    
+    """ 
+        This method is called when an SQL query returns an
+        error. It logs the error and then attempts to 
+        exit the application via the receivers' quit() method.
+    """
+    def query_error_callback(self,error):
+        self.log.log(cll.level.DATABASE,'Query encountered error: %s' % error.value)
+        return True
+        
         
     """
         Hooks into the st_send_burst method allowing the extension to insert 
@@ -38,13 +72,7 @@ class SQLEnforcer(ext.BaseExtension):
         network clients for the purposes of services.
     """
     def st_send_burst(self):
-        cfg_enforcer = self.factory.cfg.sqlextension.services.enforcer
-        #cfg_oper_tool = self.factory.cfg.sqlextension.services.oper_tool
-
-        
-        self.enforcer = self.protocol.st_add_pseudoclient(cfg_enforcer.nick,cfg_enforcer.host,cfg_enforcer.ident,'+iow',cfg_enforcer.realname,self)
-        #self.oper_tool = self.protocol.st_add_pseudoclient(cfg_oper_tool.nick,cfg_oper_tool.host,cfg_oper_tool.ident,'+iow',cfg_oper_tool.realname,self,'oper')
-        
+       pass
         
     """
         Called on a timeout after a ban, this
@@ -56,7 +84,7 @@ class SQLEnforcer(ext.BaseExtension):
         channel = kwargs.get('channel')
         banmask = kwargs.get('banmask')
 
-        self.protocol.st_send_command('SVSMODE',[channel.uid,'-b',banmask],self.enforcer.uid)
+        self.protocol.st_send_command('SVSMODE',[channel.uid,'-b',banmask],self.factory.enforcer.uid)
         self.log.log(cll.level.DEBUG,'Unbanned %s on %s (Timeban Expiry)' % (banmask,channel.uid))
         
         
@@ -101,9 +129,9 @@ class SQLEnforcer(ext.BaseExtension):
         
             banmask = '*!*@%s' % user.displayed_hostname
             
-            self.protocol.st_send_command('SVSMODE',[channel.uid,'-o+b',user.uid,banmask],self.enforcer.uid)
-            self.protocol.st_send_command('SVSPART',[user.uid,channel.uid],self.enforcer.uid)
-            self.protocol.st_send_command('NOTICE',[user.uid],self.enforcer.uid,'Access to %s denied by user level (%s < %s). You have been banned for %ss' % (channel.uid,effective_level,channel.db_min_level,cfg_enforcer.ban_accessdenied_expiry))
+            self.protocol.st_send_command('SVSMODE',[channel.uid,'-o+b',user.uid,banmask],self.factory.enforcer.uid)
+            self.protocol.st_send_command('SVSPART',[user.uid,channel.uid],self.factory.enforcer.uid)
+            self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,'Access to %s denied by user level (%s < %s). You have been banned for %ss' % (channel.uid,effective_level,channel.db_min_level,cfg_enforcer.ban_accessdenied_expiry))
             
             reactor.callLater(cfg_enforcer.ban_accessdenied_expiry, self.do_unban,channel=channel,banmask=banmask)
             
@@ -158,7 +186,7 @@ class SQLEnforcer(ext.BaseExtension):
             take_user = user.uid
         
         # Send the mode change
-        self.protocol.st_send_command('SVSMODE',[channel.uid,give + take,give_user,take_user],self.enforcer.uid)
+        self.protocol.st_send_command('SVSMODE',[channel.uid,give + take,give_user,take_user],self.factory.enforcer.uid)
         
         
     def access_level_pass(self,*args,**kwargs):
@@ -237,17 +265,18 @@ class SQLEnforcer(ext.BaseExtension):
                         self.protocol.st_send_command('SVSJOIN',[user.uid,chan],self.factory.cfg.server.sid)
 
             if not self.factory.is_bursting:
-                self.protocol.st_send_command('NOTICE',[user.uid],self.enforcer.uid,'Welcome %s! Your current global access level is %s.' % (user.nick,user.db_level))
+                self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,'Welcome %s! Your current global access level is %s.' % (user.nick,user.db_level))
                 
         return True
           
      
     def ps_privmsg_chanlevel(self,command,message,pseudoclient_uid,source_uid):
         """
-    Usage:          CHANLEVEL #channel MIN|VOICE|HOP|OP|SOP <1-100> 
-    Access:         FOUNDER ONLY
-    Description:    Sets the minimum levels on a channel to be automatically 
-                    granted access, voice, halfop, op, or protected op respectively.
+            Usage:          CHANLEVEL #channel MIN|VOICE|HOP|OP|SOP <1-100> 
+            Access:         FOUNDER ONLY
+            Description:    Sets the minimum levels on a channel to be 
+                            automatically granted access, voice, halfop, op,
+                            or protected op respectively.
         """
         
         def usage():
@@ -363,12 +392,13 @@ class SQLEnforcer(ext.BaseExtension):
              
     def ps_privmsg_help(self,command,message,pseudoclient_uid,source_uid):
         """
-    Usage:          HELP [COMMAND]
-    Access:         ALL USERS
-    Description:    Returns list of available commands or returns help
-                    documentation for a command if one is specified.
+            Usage:          HELP [COMMAND]
+            Access:         ALL USERS
+            Description:    Returns list of available commands or returns help
+                            documentation for a command if one is specified.
         """
-        if pseudoclient_uid != self.enforcer.uid:
+        
+        if pseudoclient_uid != self.factory.enforcer.uid:
             return False
        
         
@@ -389,7 +419,7 @@ class SQLEnforcer(ext.BaseExtension):
         else:
             mlist = tools.find_names(self.__class__,r'(?i)^ps_privmsg_.+$')
             
-            self.protocol.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,'The following commands are available by messaging (/msg) %s:' % self.enforcer.nick)
+            self.protocol.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,'The following commands are available by messaging (/msg) %s:' % self.factory.enforcer.nick)
             for method in mlist:
                 cmd_name = method.split('_').pop().upper()
                 self.protocol.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,' ' + cmd_name)
@@ -399,22 +429,21 @@ class SQLEnforcer(ext.BaseExtension):
         
     def ps_privmsg_chantype(self,command,message,pseudoclient_uid,source_uid):
         """
-    Usage:          CHANTYPE #channel [PUBLIC_]USERLEVEL|ACCESSLIST
-    Access:         FOUNDER ONLY
-    Description:    Sets the type of channel for authentication purposes.
- 
- 
-        USERLEVEL:  modes + access given to a user are based on their 
-                    global user level and the CHANLEVEL settings of 
-                    the named channel.
-                    
-        ACCESSLIST: modes + access given to a user are based on the 
-                    access list maintained by the founder of the channel.
-                    
-        PUBLIC_:    Specifying this before either of these two types 
-                    of channel allows public access to the channel 
-                    (any level user may join), and only modes given 
-                    are defined by the channel type.
+            Usage:          CHANTYPE #channel [PUBLIC_]USERLEVEL|ACCESSLIST
+            Access:         FOUNDER ONLY
+            Description:    Sets the type of channel for authentication purposes.
+            
+            USERLEVEL:      modes + access given to a user are based on their 
+                            global user level and the CHANLEVEL settings of 
+                            the named channel.
+                        
+            ACCESSLIST:     modes + access given to a user are based on the 
+                            access list maintained by the founder of the channel.
+                        
+            PUBLIC_:        Specifying this before either of these two types 
+                            of channel allows public access to the channel 
+                            (any level user may join), and only modes given 
+                            are defined by the channel type.
         """
         
         def usage():
@@ -429,7 +458,7 @@ class SQLEnforcer(ext.BaseExtension):
         def type_updated(*args,**kwargs):
             self.protocol.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,'Channel %s type changed to: %s' % (kwargs.get('chan'),kwargs.get('type')))
         
-        if pseudoclient_uid != self.enforcer.uid:
+        if pseudoclient_uid != self.factory.enforcer.uid:
             return
         channel_name = ''
         new_type = ''
@@ -477,8 +506,27 @@ class SQLEnforcer(ext.BaseExtension):
         
         
     def ps_privmsg_register(self,source_uid,command,message,pseudoclient_uid):
-        if pseudoclient_uid != self.enforcer.uid:
-            return
-        self.protocol.st_send_command('PRIVMSG',[source_uid.uid],pseudoclient_uid,'Registering %s' % str(message))
-        return True
+        def no_channel(chan):
+            self.protocol.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,'Channel %s does not exist' % (chan))
             
+        if pseudoclient_uid != self.factory.enforcer.uid:
+            return
+        
+        channel = message
+        # First make sure the channel name is valid
+        if not channel.startswith('#'):
+            usage()
+            return False
+   
+        chan = self.protocol.lookup_uid(message)
+        
+        # Make sure the channel exists
+        if not channel:
+            no_channel(channel)
+            return False
+             
+        # Check to see if the user is an OP on that channel
+        pprint(chan)
+             
+        self.protocol.st_send_command('PRIVMSG',[source_uid.uid],pseudoclient_uid,'Registering %s' % str(channel))
+        return True
