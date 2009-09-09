@@ -30,10 +30,7 @@ class SQLExtension(ext.BaseExtension):
     
     def __init__(self,*args,**kwargs):
         super(self.__class__, self).__init__(*args,**kwargs)
-        
-        self.factory.pending_channels = {}
-        self.factory.pending_users = {}
-        
+      
 
         try:
             self.log.log(cll.level.VERBOSE,'Initializing DB connection pool...')
@@ -42,22 +39,27 @@ class SQLExtension(ext.BaseExtension):
             
             # Setup db connection using config-specified values here
             self.factory.db = adbapi.ConnectionPool \
-                                        (
-                                            "MySQLdb", 	
-                                            host=sql_cfg.db_host, 
-                                            port=sql_cfg.db_port, 
-                                            db=sql_cfg.db_name, 
-                                            user=sql_cfg.db_username,
-                                            passwd=sql_cfg.db_password, 
-                                            cursorclass=cursors.DictCursor,
-                                            cp_reconnect=True,
-                                        )
+                (
+                    "MySQLdb", 	
+                    host=sql_cfg.db_host, 
+                    port=sql_cfg.db_port, 
+                    db=sql_cfg.db_name, 
+                    user=sql_cfg.db_username,
+                    passwd=sql_cfg.db_password, 
+                    cursorclass=cursors.DictCursor,
+                    cp_reconnect=True,
+                )
+                
+            self.factory.add_hook('quit',self)
             
         except Exception, e:
             self.log.log(cll.level.ERROR,'Error trying to initialize DB connection pool (%s)' % e)
             self.factory.quit()
             
-
+    def quit(self):
+        self.factory.db.finalClose()
+        
+            
     """ 
         This method is called when a runOperation callback
         is required. All it does is debug log that the 
@@ -96,6 +98,30 @@ class SQLExtension(ext.BaseExtension):
      
 
     """
+        Called during a netburst or new client introduction,
+        this function attempts to update user
+        details in the SQL database.
+    """
+    def st_receive_uid(self,**kwargs):
+        user = kwargs.get('user')
+        
+        
+        if not user:
+            self.log.log(cll.level.ERROR,'Did not receive expected args from main method.')
+            return 
+      
+        cfg = self.factory.cfg.sqlextension
+        self.factory.db.runOperation \
+            (
+            
+                " UPDATE " + cfg.table_prefix + "_users"
+                " SET ip = %s, last_login = %s WHERE username = %s LIMIT 1", 
+                [user.ip,user.timestamp,user.nick]
+                
+            ).addCallbacks(self.query_update_callback,self.query_error_callback)
+        
+        
+    """
         Called on a quit, it updates the SQL database with the 
         users' last quit message and quit time.
     """
@@ -111,240 +137,128 @@ class SQLExtension(ext.BaseExtension):
             (
                 "UPDATE " + cfg.table_prefix + "_users"
                 " SET last_quit = NOW(), last_quit_message = %s"
-                " WHERE id = %s LIMIT 1", 
-                [kwargs.get('reason'),user.db_id]
+                " WHERE username = %s LIMIT 1", 
+                [kwargs.get('reason'),user.nick]
             ).addCallbacks(self.query_update_callback,self.query_error_callback)
-        
-       
-    """
-        Called during a netburst or new client introduction,
-        this function attempts to query + update user
-        details from the SQL database and places the user 
-        UID into a pending_users table so functions that rely
-        on updated data will be halted until the query completes.
-    """
-    def st_receive_uid(self,**kwargs):
-        user = kwargs.get('user')
-        
-        
-        if not user:
-            self.log.log(cll.level.ERROR,'Did not receive expected args from main method.')
-            return 
-            
-        d = defer.Deferred()
-        d.addCallback(lambda x: self.get_user(user.nick))
-        d.addCallbacks(self.update_local_user_from_db,self.user_update_clear_pending,[],{'user': user})
-        d.addCallbacks(self.user_update_clear_pending,self.user_update_clear_pending,[],{'user': user})
-        
-        self.factory.pending_users[user.uid] = d
-        self.factory.pending_users[user.uid].callback(None)
 
-        
+    
+    """
+        Gets multiple users' details from the SQL database.
+        Returns a deferred for use with callbacks.
+    """
+    def get_users_complete(self,trans,names):
+        # We always set cfg as a local variable before the query for ease of use, but 
+        # it *CANNOT* be a class wide thing because then config rehashes would not be 
+        # propagated correctly
+        cfg = self.factory.cfg.sqlextension
             
+        format = ','.join(['%s'] * len(names))
+        trans.execute \
+        (
+            " SELECT"
+            " r.id as id, r.username as username, r.level as level, r.approved as approved,"
+            " (SELECT"
+                " GROUP_CONCAT(c.name SEPARATOR ',')"
+                " FROM " 
+                    " " + cfg.table_prefix + "_user_autojoin a,"
+                    " " + cfg.table_prefix + "_channels c"
+                " WHERE a.user_id = r.id AND a.channel_id = c.id ORDER BY c.name ASC"
+            " ) as autojoin"
+            " FROM " + cfg.table_prefix + "_users r"
+            " WHERE username IN (%s)" % format,tuple(names)
+        )
+        d = {}
+        for x in trans.fetchall():
+            d[x['username']] = x
+            
+        return d
         
     """
         Gets a users' details from the SQL database.
         Returns a deferred for use with callbacks.
     """
-    def get_user(self,name):
-        # We always set cfg as a local variable before the query for ease of use, but 
-        # it *CANNOT* be a class wide thing because then config rehashes would not be 
-        # propagated correctly
+    def get_user_complete(self,trans,name):
         cfg = self.factory.cfg.sqlextension
+       
+        trans.execute \
+        (
+            " SELECT"
+            " r.id as id, r.level as level, r.approved as approved,"
+            " (SELECT"
+                " GROUP_CONCAT(c.name SEPARATOR ',')"
+                " FROM " 
+                    " " + cfg.table_prefix + "_user_autojoin a,"
+                    " " + cfg.table_prefix + "_channels c"
+                " WHERE a.user_id = r.id AND a.channel_id = c.id ORDER BY c.name ASC"
+            " ) as autojoin"
+            " FROM " + cfg.table_prefix + "_users r"
+            " WHERE username = %s LIMIT 1",name
+        )
         
-        return self.factory.db.runQuery \
-            (
-                " SELECT"
-                " r.id as db_id, r.level as db_level, r.approved as db_approved,"
-                " (SELECT"
-                    " GROUP_CONCAT(c.name SEPARATOR ',')"
-                    " FROM " 
-                        " " + cfg.table_prefix + "_user_autojoin a,"
-                        " " + cfg.table_prefix + "_channels c"
-                    " WHERE a.user_id = r.id AND a.channel_id = c.id ORDER BY c.name ASC"
-                " ) as autojoin"
-                " FROM " + cfg.table_prefix + "_users r"
-                " WHERE username = %s LIMIT 1",name
-            )
-            
-
-    def get_channel_modes(self,name):
-        cfg = self.factory.cfg.sqlextension
-        return self.factory.db.runQuery \
-            (
-            
-                " SELECT "
-                    " m.id as db_id, m.mode as db_mode, m.value as db_value"
-                " FROM " + cfg.table_prefix + "_channels c" 
-                " INNER JOIN " + cfg.table_prefix + "_channel_modes m"
-                " ON (c.id = m.channel_id)"
-                " WHERE c.name = %s LIMIT 1",name
-                
-            )
-               
-               
-    def get_channel(self,name):	
-        cfg = self.factory.cfg.sqlextension
-        return self.factory.db.runQuery \
-            (
-            
-                " SELECT "
-                    " c.id as db_id, c.founder_id as db_founder_id, c.topic as db_topic,"
-                    " c.type as db_type, c.min_level as db_min_level,"
-                    " c.level_voice as db_level_voice, c.level_halfop as db_level_halfop,"
-                    " c.level_op as db_level_op, c.level_superop as db_level_superop,"
-                    " u.username as db_founder_name" 
-                " FROM " + cfg.table_prefix + "_channels c" 
-                " LEFT JOIN " + cfg.table_prefix + "_users u"
-                " ON (c.founder_id = u.id)"
-                " WHERE c.name = %s LIMIT 1",name
-                
-            )
-
-            
-    def get_channel_access_list(self,name):
-        cfg = self.factory.cfg.sqlextension
-        return self.factory.db.runQuery \
-            (
-            
-                " SELECT "
-                    " a.user_id, a.access_level"
-                " FROM " + cfg.table_prefix + "_channel_access a," 
-                " " + cfg.table_prefix + "_channels c" 
-                " WHERE c.name = %s AND c.id = channel_id ORDER BY a.access_level DESC",name
-                
-            )       
-            
-            
-    def st_receive_fjoin(self,timestamp,channel,users,modes):
-
-        channel_uid = self.protocol.lookup_uid(channel)
-        
-        if not channel_uid:
-            self.log.log(cll.level.ERROR,'We received a hook FJOIN but the channel could not be looked up by UID :wtc:')
-            return
-            
-                    
-        if self.factory.is_bursting:
-
-            # This is a BURST FJOIN. We want to load all the info
-            # we can for this channel locally and then we have to
-            # make less queries later. We save the defer into a
-            # pending list so we can add callbacks from functions 
-            # requiring this data to be updated before they can 
-            # be executed.
-            
-            self.channel_request_db_update(channel_uid).callback(None)
-
-
-    def channel_request_db_update(self,channel):
-        d = defer.Deferred()
-        d.addCallback(lambda x: self.get_channel(channel.uid))
-        
-        d.addCallbacks(self.update_local_channel_from_db,self.channel_update_clear_pending,[],{'channel': channel})
-        d.addCallback(lambda y: self.get_channel_access_list(channel))
-        
-        d.addCallbacks(self.update_local_channel_modes_from_db,self.channel_update_clear_pending,[],{'channel': channel})
-        d.addCallbacks(self.channel_update_clear_pending,self.channel_update_clear_pending,[],{'channel': channel})
-  
-        
-        self.factory.pending_channels[channel.uid] = d
-        return self.factory.pending_channels[channel.uid]
-        
-    
-    def update_local_channel_modes_from_db(self,result,**kwargs):
-        channel_uid = kwargs.get('channel')
-        if not result:
-            # Channel is not registered, so ignore it
-            return
-        
-
-            
+        return trans.fetchone()
          
-    def channel_update_clear_pending(self,result,**kwargs):
-        channel_uid = kwargs.get('channel')
-        
-        if channel_uid:
-            if channel_uid.uid in self.factory.pending_channels:
-                del self.factory.pending_channels[channel_uid.uid]
-                
-        return True
 
-     
-     
-    """
-        This is called back when a channel update
-        SQL query completes. It updates a local channel
-        object with data from the database and 
-    """
-    def update_local_channel_from_db(self,result,**kwargs):
-        if result:
-            channel_uid = kwargs.get('channel')
-            # This should only ever contain 1 channel but the for allows us
-            # to un-listify result without creating a new var
-            for db_channel in result:
-                channel_uid.update_from(db_channel)
             
-        return True
-            
-
-       
-       
-    """
-        This is called back when a channel update
-        SQL query completes. It updates a local channel
-        object with data from the database and 
-    """
-    def update_local_channel_modes_from_db(self,result,**kwargs):
-       
-        if result:
-            channel_uid = kwargs.get('channel')
-            # This should only ever contain 1 channel but the for allows us
-            # to un-listify result without creating a new var
-      
-            for aline in result:
-                channel_uid.access[int(aline.get('user_id',0))] = int(aline.get('access_level',0))
-           
-        return True
-
-
-    """ 
-        Clear lookup errors from the pending list
-        too so we can continue to work on them even though
-        they have no DB records.
-    """
-    def user_update_clear_pending(self,*args,**kwargs):
-     
-        user = kwargs.get('user')
-        if user:
-            if user.uid in self.factory.pending_users:
-                del self.factory.pending_users[user.uid]
+    def get_channel_details(self,trans,name):
+        cfg = self.factory.cfg.sqlextension
+        trans.execute \
+        (   " SELECT "
+                " c.id as id, c.founder_id as founder_id, c.topic as topic,"
+                " c.type as type, c.min_level as min_level,"
+                " c.level_voice as level_voice, c.level_halfop as level_halfop,"
+                " c.level_op as level_op, c.level_superop as level_superop,"
+                " c.level_settings as level_settings, u.username as founder_name" 
+            " FROM " + cfg.table_prefix + "_channels c" 
+            " LEFT JOIN " + cfg.table_prefix + "_users u"
+            " ON (c.founder_id = u.id)"
+            " WHERE c.name = %s LIMIT 1",name
+        )
+        return trans.fetchone()
+    
+    def get_channel_accesslist(self,trans,name):
+        cfg = self.factory.cfg.sqlextension
+        trans.execute \
+        (    
+            " SELECT "
+                " a.user_id, a.access_level"
+            " FROM " + cfg.table_prefix + "_channel_access a," 
+            " " + cfg.table_prefix + "_channels c" 
+            " WHERE c.name = %s AND c.id = channel_id ORDER BY a.access_level DESC",name
+        )
+        d = {}
         
-        return True
-
-    def update_local_user_from_db(self,result,**kwargs):
-       
-        if result:
-            user_uid = kwargs.get('user')
+        for x in trans.fetchall():
+            d[x['user_id']] = x['access_level']
             
-            # This should only ever contain 1 user but the for allows us
-            # to un-listify result without creating a new var
-            for db_user in result:
-                user_uid.update_from(db_user)
-                
-                    
-                cfg = self.factory.cfg.sqlextension
-                self.factory.db.runOperation \
-                    (
-                    
-                        " UPDATE " + cfg.table_prefix + "_users"
-                        " SET ip = %s, last_login = %s WHERE id = %s LIMIT 1", 
-                        [user_uid.ip,user_uid.timestamp,user_uid.db_id]
-                        
-                    ).addCallbacks(self.query_update_callback,self.user_update_clear_pending,{'user_uid': user_uid})
-                    
-        return True
+        return d
+            
+    def get_channel_modes(self,trans,name): 
+        cfg = self.factory.cfg.sqlextension
+        trans.execute \
+        (
         
+            " SELECT "
+                " m.id as id, m.mode as mode, m.value as value"
+            " FROM " + cfg.table_prefix + "_channels c" 
+            " INNER JOIN " + cfg.table_prefix + "_channel_modes m"
+            " ON (c.id = m.channel_id)"
+            " WHERE c.name = %s LIMIT 1",name
+            
+        )
+        
+        return trans.fetchone()
+        
+    def get_channel_complete(self,trans,name):
+
+        return \
+        [
+            self.get_channel_details(trans,name),
+            self.get_channel_accesslist(trans,name),
+            self.get_channel_modes(trans,name),
+        ]
+   
+       
+    
 
    
     

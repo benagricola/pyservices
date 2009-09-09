@@ -68,6 +68,23 @@ sqlextension:
             realname:   'The Enforcer'
             
             ban_accessdenied_expiry:    600 # Seconds
+            
+            bad_behaviour:
+            {
+                enabled:    True,
+                threshold:  50,
+                timeout:    600,
+                
+                reason:     'AUTOKILLED: Persistent terrible behaviour >:(',
+                warning:    'If you misbehave further you will be killed [%s/%s]', # Current Bad Points / Current Threshold for killing
+                removed:    '%s bad behaviour points have been removed from your record [%s/%s]', # Points Removed / Current Bad Points / Current Threshold for killing
+
+                value_topic_enforce:            20,
+                timeout_topic_enforce:          600,
+                
+                value_accessdenied_enforce:     35,
+                timeout_accessdenied_enforce:   1200,
+            }
         }
         
         oper_tool:

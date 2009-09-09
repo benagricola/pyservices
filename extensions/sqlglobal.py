@@ -35,6 +35,8 @@ class SQLGlobal(ext.BaseExtension):
 
         super(self.__class__, self).__init__(*args,**kwargs)
 
+        self.sqe = self.factory.loaded_extensions.get('SQLExtension')
+        
         if not hasattr(self.factory,'global_announce') or not self.factory.global_announce:
             self.create_global_announce()
             
@@ -84,7 +86,7 @@ class SQLGlobal(ext.BaseExtension):
     def quit(self):
         if self.factory.cfg.sqlextension.services.global_status_messages:
             self.send_global_notice(self.factory.cfg.sqlextension.services.global_status_disconnect)
-        self.factory.db.finalClose()
+        
         
         
     # !!! FIX: This should be a part of operserve but is also related to global

@@ -23,7 +23,7 @@ class Enumerate(object):
             setattr(self, name, number)
 
 # This is where we set which keywords to enumerate
-cmd = Enumerate('SERVER UID OPERTYPE METADATA FJOIN FHOST FMODE FTOPIC PRIVMSG MODE PART QUIT')
+cmd = Enumerate('SERVER UID OPERTYPE METADATA FJOIN FHOST FMODE FTOPIC TOPIC PRIVMSG MODE PART QUIT')
 
 # This is where we set the field names and numbers we expect to find for a specified "SR" (Argument Parsing) type
 sr_fields = {}
@@ -35,7 +35,7 @@ sr_fields[cmd.FJOIN] 		= ['channel','timestamp','modes','parameters','users']
 sr_fields[cmd.FHOST] 		= ['hostname']
 sr_fields[cmd.FMODE] 		= ['target','timestamp','modes','parameters']
 sr_fields[cmd.FTOPIC] 		= ['channel','topic_time','topic_set_by','topic']
-
+sr_fields[cmd.TOPIC] 		= ['channel','topic']
 sr_fields[cmd.PRIVMSG] 		= ['uid','message']
 sr_fields[cmd.MODE] 		= ['target','modes','parameters']
 sr_fields[cmd.PART] 		= ['channel','reason']

@@ -44,20 +44,7 @@ def loadreload(object):
     except:
         raise ImportError("Error opening file %s for error checking" % mod_path)
 
-    try:
-        compile(codebase, mod_name, "exec")
-    except:
-        type,exc = sys.exc_info()[0:2]
-        raise ImportError("Could not recompile %s (%s on line %s)" % (mod_name,type,exc.lineno))
-       
-    else:
     
-        try:
-            execfile(mod_path)
-        except:
-            type,exc = sys.exc_info()[0:2]
-            raise ImportError("Could not recompile %s (%s on line %s)" % (mod_name,type,exc.lineno))
-        else:
-            return reload(module)
+    return reload(module)
              
     

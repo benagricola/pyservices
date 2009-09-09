@@ -19,8 +19,8 @@ import common.ext as ext
 from pprint import pprint, pformat
 
 from twisted.enterprise import adbapi 
-from twisted.internet import reactor,defer
-
+from twisted.internet import reactor
+from twisted.internet import defer
 
 """
     Acts as a container for extension functions which
@@ -28,6 +28,8 @@ from twisted.internet import reactor,defer
 """
 class SQLEnforcer(ext.BaseExtension):
     required_extensions = ['SQLExtension']
+    
+    bad_behaviour_reg = {}
     
     def __init__(self,*args,**kwargs):
         super(self.__class__, self).__init__(*args,**kwargs)
@@ -44,6 +46,7 @@ class SQLEnforcer(ext.BaseExtension):
         #cfg_oper_tool = self.factory.cfg.sqlextension.services.oper_tool
         #self.oper_tool = self.protocol.st_add_pseudoclient(cfg_oper_tool.nick,cfg_oper_tool.host,cfg_oper_tool.ident,'+iow',cfg_oper_tool.realname,self,'oper')
         
+     
    
     """
         Calls the factory method to create a pseudoclient for this
@@ -76,6 +79,101 @@ class SQLEnforcer(ext.BaseExtension):
         return True
         
         
+        
+    def bad_behaviour(self,user,value,timeout=600):
+        cfg_bad_behaviour = self.factory.cfg.sqlextension.services.enforcer.bad_behaviour
+        
+        def send_warning(value,threshold):
+            self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,cfg_bad_behaviour.warning % (value,threshold))
+            
+        def send_removal(value,cur_value,threshold):
+            self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,cfg_bad_behaviour.removed % (value,cur_value,threshold))
+              
+        def remove_bad_behaviour(user,value):
+            if user.uid in self.bad_behaviour_reg:
+                cur_val = self.bad_behaviour_reg.get(user.uid)
+                
+                if cur_val > value:
+                    self.bad_behaviour_reg[user.uid] = cur_val - value
+                    send_removal(value,self.bad_behaviour_reg[user.uid],cfg_bad_behaviour.threshold)
+                else:
+                    del self.bad_behaviour_reg[user.uid]
+                    send_removal(value,0,cfg_bad_behaviour.threshold)
+                    
+
+        if not cfg_bad_behaviour.enabled:
+            return False
+            
+        if user.uid not in self.bad_behaviour_reg:
+            self.bad_behaviour_reg[user.uid] = value
+            send_warning(self.bad_behaviour_reg[user.uid],cfg_bad_behaviour.threshold)
+            reactor.callLater(timeout, remove_bad_behaviour,[user,value])
+            return False
+        else:
+            cur_val = self.bad_behaviour_reg.get(user.uid)
+            
+            self.bad_behaviour_reg[user.uid] = cur_val + value
+            
+            if self.bad_behaviour_reg[user.uid] >= cfg_bad_behaviour.threshold:
+                # kill user
+                self.protocol.st_send_command('KILL',[user.nick],self.factory.enforcer.uid,cfg_bad_behaviour.reason)
+                return True
+            else:
+                
+                send_warning(self.bad_behaviour_reg[user.uid],cfg_bad_behaviour.threshold)
+                reactor.callLater(timeout, remove_bad_behaviour,[user,value])
+                return False
+        
+        
+    def st_receive_ftopic(self,*args,**kwargs):
+        return self.topic_enforce(*args,**kwargs)
+        
+    def st_receive_topic(self,*args,**kwargs):
+        return self.topic_enforce(*args,**kwargs)
+     
+     
+    @defer.inlineCallbacks
+    def topic_enforce(self,user,channel,topic):
+         
+         
+        def topic_updated(*args,**kwargs):
+            channel = kwargs.get('channel')
+            self.protocol.st_send_command('NOTICE',[channel],self.factory.enforcer.uid,'Persistent topic updated by founder')
+            
+        db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,channel.uid)
+        
+        if user:
+            db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
+        else:
+            db_user = None
+            
+        if db_channel:
+            db_topic = db_channel.get('topic')
+            
+            if db_topic and db_topic != topic:
+                
+                if not db_user:
+                    # User not found, this probably means this came from a network burst FTOPIC
+                    # At this point we enforce the topic at all times, since we don't know who
+                    # set it last.
+                    self.protocol.st_send_command('TOPIC',[channel.uid],self.factory.enforcer.uid,db_topic)
+                    
+                elif db_user['id'] != db_channel['founder_id']:
+                    # Channel topic is incorrect and must be enforced, this user is not channel founder
+                    self.protocol.st_send_command('TOPIC',[channel.uid],self.factory.enforcer.uid,db_topic)
+                    cfg_bad_behaviour = self.factory.cfg.sqlextension.services.enforcer.bad_behaviour
+                    self.bad_behaviour(user,cfg_bad_behaviour.value_topic_enforce,cfg_bad_behaviour.timeout_topic_enforce)
+                else:
+                    # Channel topic changed by founder, record it
+                    cfg = self.factory.cfg.sqlextension
+                    self.factory.db.runOperation \
+                        (
+                            "UPDATE " + cfg.table_prefix + "_channels SET topic = %s WHERE id = %s LIMIT 1", 
+                            [topic,db_channel['id']]
+                        ).addCallbacks(topic_updated,self.query_error_callback,None,{'channel': channel.uid})
+                    
+
+                    
     """
         Called on a timeout after a ban, this
         function unbans a given banmask on a 
@@ -96,48 +194,51 @@ class SQLEnforcer(ext.BaseExtension):
         access level or their access level on that channel,
         depending on the channel type.
     """
-    def enforce_modes(self,*args,**kwargs):
+    
+    def enforce_modes(self,user,db_user,channel,db_channel,db_accesslist):
         cfg_enforcer = self.factory.cfg.sqlextension.services.enforcer
-        
-        user = kwargs.get('user')
-        channel = kwargs.get('channel')
-        public = kwargs.get('public',False)
-        
-        _d = None
-        _r = None
 
+        # Grab ID / founder ID like this instead of using .get()
+        # so in the (most likely impossible) event that neither a
+        # user or db record is found at this point, a user is not 
+        # given maximum access by mistake (the services will crash)
         
-        # If user update for this is pending, add a callback to the pending method
-        # AND if there was also a channel update pending, then chain them.
-        if user.uid in self.factory.pending_users:
-            self.factory.pending_users.get(user.uid).addCallback(getattr(self,tools.called_by(0)),**kwargs)
-            return
-
-        if user.db_id == channel.db_founder_id:
+        
+        public = db_channel['type'].startswith('PUBLIC')
+       
+            
+        if not db_user:
+            effective_level = 0
+            
+        elif db_user['id'] == db_channel['founder_id']:
             effective_level = 100
 
-        elif channel.db_type in ('ACCESSLIST','PUBLIC_ACCESSLIST'): 
+        elif db_channel['type'] in ('ACCESSLIST','PUBLIC_ACCESSLIST'): 
             
-            effective_level = channel.access.get(user.db_id,0)
+            effective_level = db_accesslist.get(db_user['id'],0)
                   
         else:
-             effective_level = user.db_id
+             effective_level = db_user['level']
         
-
+       
         # First check if users' level is equal or more
         # than the minimum level for this channel, otherwise
         # remove them if the channel is not public
-        if effective_level < channel.db_min_level and not public:
+        if effective_level < db_channel['min_level'] and not public:
         
             banmask = '*!*@%s' % user.displayed_hostname
             
-            self.protocol.st_send_command('SVSMODE',[channel.uid,'-o+b',user.uid,banmask],self.factory.enforcer.uid)
-            self.protocol.st_send_command('SVSPART',[user.uid,channel.uid],self.factory.enforcer.uid)
-            self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,'Access to %s denied by user level (%s < %s). You have been banned for %ss' % (channel.uid,effective_level,channel.db_min_level,cfg_enforcer.ban_accessdenied_expiry))
-            
-            reactor.callLater(cfg_enforcer.ban_accessdenied_expiry, self.do_unban,channel=channel,banmask=banmask)
-            
-            self.log.log(cll.level.DEBUG,'Banned %s on %s (%ss Access denied timeban)' % (banmask,channel.uid,cfg_enforcer.ban_accessdenied_expiry))
+            cfg_bad_behaviour = self.factory.cfg.sqlextension.services.enforcer.bad_behaviour
+            if not self.bad_behaviour(user,cfg_bad_behaviour.value_accessdenied_enforce,cfg_bad_behaviour.timeout_accessdenied_enforce):
+                    
+                self.protocol.st_send_command('SVSMODE',[channel.uid,'-o+b',user.uid,banmask],self.factory.enforcer.uid)
+                self.protocol.st_send_command('SVSPART',[user.uid,channel.uid],self.factory.enforcer.uid)
+                self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,'Access to %s denied by user level (%s < %s). You have been banned for %ss' % (channel.uid,effective_level,db_channel['min_level'],cfg_enforcer.ban_accessdenied_expiry))
+                
+                reactor.callLater(cfg_enforcer.ban_accessdenied_expiry, self.do_unban,channel=channel,banmask=banmask)
+                
+                self.log.log(cll.level.DEBUG,'Banned %s on %s (%ss Access denied timeban)' % (banmask,channel.uid,cfg_enforcer.ban_accessdenied_expiry))
+                
             return
 
         give_user = ''
@@ -146,32 +247,35 @@ class SQLEnforcer(ext.BaseExtension):
         modes_order = 'qaohv'
         give = ''
         take = ''
-        
-        if user.db_id == channel.db_founder_id:
+        if not db_user:
+            # Remove everything, this user doesn't exist
+            take = modes_order
+            
+        elif db_user.get('id') == db_channel['founder_id']:
             # Remove nothing, user is the channel founder
             # so give founder mode + all trimmings 
             give = modes_order
             
-        elif effective_level >= channel.db_level_superop:
+        elif effective_level >= db_channel['level_superop']:
             # Remove nothing, superops are awesome.
             # Give them all roles up to superop
             give = modes_order[1:]
             take = modes_order[0]
             
-        elif effective_level >= channel.db_level_op:
+        elif effective_level >= db_channel['level_op']:
             # Remove superops only (no-one should ever have this)
             # because SOP is given by services only
             give = modes_order[2:]
             take = modes_order[:2]
 
             
-        elif effective_level >= channel.db_level_halfop:
+        elif effective_level >= db_channel['level_halfop']:
             # Remove ops
             give = modes_order[3:]
             take = modes_order[:3]
 
             
-        elif effective_level >= channel.db_level_voice:
+        elif effective_level >= db_channel['level_voice']:
             # Remove halfops
             give = modes_order[4:]
             take = modes_order[:4]
@@ -180,17 +284,19 @@ class SQLEnforcer(ext.BaseExtension):
             take = modes_order
         
         if give:
+            give_user = ' '.join([user.uid] * len(give))
             give = '+' + give
-            give_user = user.uid
-            
+
         if take:
+            take_user = ' '.join([user.uid] * len(take))
             take = '-' + take
-            take_user = user.uid
+            
         
         # Send the mode change
         self.protocol.st_send_command('SVSMODE',[channel.uid,give + take,give_user,take_user],self.factory.enforcer.uid)
         
         
+    @defer.inlineCallbacks
     def access_level_pass(self,*args,**kwargs):
         users = kwargs.get('users')
         channel = kwargs.get('channel')
@@ -198,63 +304,65 @@ class SQLEnforcer(ext.BaseExtension):
         if not channel or not users:
             return 
 
-        # Check if channel has a founder first 
-        if not hasattr(channel,'db_founder_id'):
-            # Channel is not registered, we don't care.
+        db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,channel.uid)
+        db_accesslist = yield self.factory.db.runInteraction(self.sqe.get_channel_accesslist,channel.uid)
+        
+        if not db_channel:
+            # Channel is not registered, ignore it
             return
         
-        # Channel is registered, set modes / remove users based
-        # on the type of channel.
+        # Get all users at once so not to spam queries
+        user_nicks = [user['instance'].nick for user in users.values()]
+        
+        db_users = yield self.factory.db.runInteraction(self.sqe.get_users_complete,user_nicks)
         
         for uitem in users.values():
             user = uitem.get('instance')
             modes = uitem.get('modes')
             
-            if channel.db_type in ('USERLEVEL','ACCESSLIST','PUBLIC_USERLEVEL','PUBLIC_ACCESSLIST'):
-                if channel.db_type.startswith('PUBLIC_'):
-                    self.enforce_modes(user=user,channel=channel,public=True)
-                else:
-                    self.enforce_modes(user=user,channel=channel)
-                    
-            else:
-                # Channels without a channel type will get handled 
-                # like a PUBLIC_USERLEVEL channel, although this 
-                # should never happen.
-                self.enforce_modes(user=user,channel=channel,public=True)	
-                    
-    
+            db_user = db_users.get(user.nick,None)
+            self.enforce_modes(user,db_user,channel,db_channel,db_accesslist)
+                
+
     """
         This command is hooked when someone joins a channel.
-        If the channel is still pending an update via database,
-        we add a callback to the database update and return.
-        Otherwise, we execute an access level pass over the 
-        channel.
     """
+    @defer.inlineCallbacks
     def st_receive_fjoin(self,timestamp,channel,users,modes):
 
         channel_uid = self.protocol.lookup_uid(channel)
         
         if not channel_uid:
             self.log.log(cll.level.ERROR,'We received a hook FJOIN but the channel could not be looked up by UID :wtc:')
-            return False
-   
-        if channel_uid.uid in self.factory.pending_channels:
-            _d = self.factory.pending_channels.get(channel_uid.uid).addCallback(self.access_level_pass,users=channel_uid.users,channel=channel_uid)
-            
-        else:
+
+        elif self.factory.is_bursting:
             self.access_level_pass(users=channel_uid.users,channel=channel_uid)
+        else:
+            
+            db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,channel_uid.uid)
+            
+            if not db_channel:
+                # Channel is not registered, ignore it
+                return
+            
+            db_accesslist = yield self.factory.db.runInteraction(self.sqe.get_channel_accesslist,channel_uid.uid)
+            
+            for user in users:
+                user_uid = self.protocol.lookup_uid(user)
+                if not user_uid:
+                    break
+                db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user_uid.nick)
+                self.enforce_modes(user_uid,db_user,channel_uid,db_channel,db_accesslist)
         
-        return True  
 
         
     """
         This is called when we receive a new UID from the peer server,
         either during the connect sequence or when a new client is 
-        introduced. If the user lookup is still pending, we add a
-        callback on the query and return, otherwise we trigger
-        a welcome which notifies users of their current global
-        access level.
+        introduced. We trigger a welcome which notifies users of 
+        their current global access level.
     """
+    @defer.inlineCallbacks
     def st_receive_uid(self,**kwargs):
         user = kwargs.get('user')
       
@@ -263,36 +371,33 @@ class SQLEnforcer(ext.BaseExtension):
             return 
             
 
-        if user.uid in self.factory.pending_users:
-            _d = self.factory.pending_users.get(user.uid).addCallback(self.user_trigger_welcome,user=user)
-            return
+        db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
         
-        self.user_trigger_welcome(user=user)
+        self.user_trigger_welcome(user,db_user)
         
     
     """
         Gives the user a welcome message and executes any autojoins that they may
         have.
     """
-    def user_trigger_welcome(self,*args,**kwargs):
-        user = kwargs.get('user')
-        if user:
-            # Do autojoins here
-            if hasattr(user,'autojoin'):
-                if user.autojoin:
-                    for chan in user.autojoin.split(','):
-                        self.protocol.st_send_command('SVSJOIN',[user.uid,chan],self.factory.cfg.server.sid)
+    def user_trigger_welcome(self,user,db_user):
+        ajchans = db_user.get('autojoin')
+        if not self.factory.is_bursting:
+            if ajchans:
+                for chan in ajchans.split(','):
+                    self.protocol.st_send_command('SVSJOIN',[user.uid,chan],self.factory.cfg.server.sid)
 
-            if not self.factory.is_bursting:
-                self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,'Welcome %s! Your current global access level is %s.' % (user.nick,user.db_level))
-                
-        return True
+    
+            self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,'Welcome %s! Your current global access level is %s.' % (user.nick,db_user.get('level',0)))
+            
+    
           
      
     """
         Handles Enforcer CHANLEVEL command, using internal functions for error output
         and initial docstring for HELP output.
     """
+    @defer.inlineCallbacks
     def ps_privmsg_chanlevel(self,command,message,pseudoclient_uid,source_uid):
         """
             Usage:          CHANLEVEL #channel MIN|VOICE|HOP|OP|SOP <1-100> 
@@ -336,7 +441,7 @@ class SQLEnforcer(ext.BaseExtension):
             
         except ValueError:
             usage()
-            return False
+            return 
         
         # Look up the channel and the user UID in question
         channel = self.protocol.lookup_uid(channel_name)
@@ -345,71 +450,74 @@ class SQLEnforcer(ext.BaseExtension):
         # If either of them don't exist, show usage
         if not channel or not user:
             usage()
-            return False
+            return
             
-            
+        db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,channel.uid)
+        db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
+        
         # If user is not the channel founder, show message
-        if channel.db_founder_id != user.db_id:
+        if db_channel['founder_id'] != db_user['id']:
             access_denied()
-            return False
+            return 
             
             
         # If there is no change to the level, show message
-        if channel.db_min_level == new_level:
+        if db_channel['min_level'] == new_level:
             no_change(channel.uid,type,new_level)
-            return False
+            return 
+            
             
         # Otherwise set value based on TYPE field
         # !!! TODO: Clean this up somehow, it's ugly
         if type in ('MIN'):
-            if new_level > channel.db_level_voice:
-                conflicting_mode('VOICE',channel.db_level_voice,'MIN',new_level)
+            if new_level > db_channel['level_voice']:
+                conflicting_mode('VOICE',db_channel['level_voice'],'MIN',new_level)
                 return
-            channel.db_min_level = new_level
             db_field = 'min_level'
             
+            
         elif type in ('VOICE'):
-            if new_level >= channel.db_level_halfop:
-                conflicting_mode('HALFOP',channel.db_level_halfop,'VOICE',new_level)
+            if new_level >= db_channel['level_halfop']:
+                conflicting_mode('HALFOP',db_channel['level_halfop'],'VOICE',new_level)
                 return
             # Leave this at < rather than <= so its possible to auto voice all users
             # on join.
-            elif new_level < channel.db_min_level:
-                conflicting_mode('VOICE',channel.db_level_voice,'MIN',channel.db_min_level)
+            elif new_level < db_channel['min_level']:
+                conflicting_mode('VOICE',db_channel['level_voice'],'MIN',db_channel['min_level'])
                 return
-                
-            channel.db_level_voice = new_level
+
             db_field = 'level_voice'
             
+            
         elif type in ('HALFOP','HOP'):
-            if new_level >= channel.db_level_op:
-                conflicting_mode('OP',channel.db_level_op,'HALFOP',new_level)
+            if new_level >= db_channel['level_op']:
+                conflicting_mode('OP',db_channel['level_op'],'HALFOP',new_level)
                 return
-            elif new_level <= channel.db_level_voice:
-                conflicting_mode('HALFOP',channel.db_level_halfop,'VOICE',channel.db_level_voice)
+            elif new_level <= db_channel['level_voice']:
+                conflicting_mode('HALFOP',db_channel['level_halfop'],'VOICE',db_channel['level_voice'])
                 return
                 
-            channel.db_level_halfop = new_level
             db_field = 'level_halfop'
             
+            
         elif type in ('OP'):
-            if new_level >= channel.db_level_superop:
-                conflicting_mode('SOP',channel.db_level_sop,'OP',new_level)
+            if new_level >= db_channel['level_superop']:
+                conflicting_mode('SOP',db_channel['level_superop'],'OP',new_level)
                 return
-            elif new_level <= channel.db_level_halfop:
-                conflicting_mode('OP',channel.db_level_op,'HOP',chan.db_level_halfop)
+            elif new_level <= db_channel['level_halfop']:
+                conflicting_mode('OP',db_channel['level_op'],'HOP',db_channel['level_halfop'])
                 return
                 
-            channel.db_level_op = new_level
             db_field = 'level_op'
         
+        
         elif type in ('SOP','PROTECTED'):
-            if new_level <= channel.db_level_op:
-                conflicting_mode('SOP',channel.db_level_superop,'OP',chan.db_level_op)
+            if new_level <= db_channel['level_op']:
+                conflicting_mode('SOP',db_channel['level_superop'],'OP',db_channel['level_op'])
                 return
                 
-            channel.db_level_superop = new_level
             db_field = 'level_superop'
+            
             
         # Update the db with the level from local data, then run an access pass
         # over the channel to change modes on all users if required
@@ -417,12 +525,12 @@ class SQLEnforcer(ext.BaseExtension):
         self.factory.db.runOperation \
             (
                 "UPDATE " + cfg.table_prefix + "_channels SET " + db_field + " = %s WHERE id = %s LIMIT 1", 
-                [new_level,channel.db_id]
+                [new_level,db_channel['id']]
             ).addCallbacks(level_updated,self.query_error_callback,None,{'chan': channel.uid,'type': type, 'level': new_level})
         
         self.access_level_pass(users=channel.users,channel=channel)
         
-        return False
+        return
         
     """
         Provides help command support for the Enforcer 
@@ -468,12 +576,13 @@ class SQLEnforcer(ext.BaseExtension):
     """
         Set the channel type of a channel
     """
+    @defer.inlineCallbacks
     def ps_privmsg_chantype(self,command,message,pseudoclient_uid,source_uid):
         """
             Usage:          CHANTYPE #channel [PUBLIC_]USERLEVEL|ACCESSLIST
             Access:         FOUNDER ONLY
             Description:    Sets the type of channel for authentication purposes.
-            
+                            
             USERLEVEL:      modes + access given to a user are based on their 
                             global user level and the CHANLEVEL settings of 
                             the named channel.
@@ -522,31 +631,40 @@ class SQLEnforcer(ext.BaseExtension):
         if not channel or not user:
             usage()
             return
-            
-        if channel.db_type == new_type:
+        
+        db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,channel.uid)
+        db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
+        # If user is not the channel founder, show message
+        if db_channel['founder_id'] != db_user['id']:
+            access_denied()
+            return 
+
+        if db_channel['type'] == new_type:
             no_change(channel.uid,new_type)
             return
-            
-        if channel.db_founder_id != user.db_id:
-            access_denied()
-            return
-        
 
-        channel.db_type = new_type.upper()
-        
         cfg = self.factory.cfg.sqlextension
         self.factory.db.runOperation \
             (
                 "UPDATE " + cfg.table_prefix + "_channels SET type = %s WHERE id = %s LIMIT 1", 
-                [channel.db_type,channel.db_id]
-            ).addCallbacks(type_updated,self.query_error_callback,None,{'chan': channel.uid,'type': channel.db_type})
+                [new_type,db_channel['id']]
+            ).addCallbacks(type_updated,self.query_error_callback,None,{'chan': channel.uid,'type': new_type})
         
         self.access_level_pass(users=channel.users,channel=channel)
         
-        return True
+        return
         
         
+    @defer.inlineCallbacks    
     def ps_privmsg_register(self,source_uid,command,message,pseudoclient_uid):
+        """
+            Usage:          REGISTER #channel
+            Access:         CHANNEL OPERATOR ONLY
+            Description:    Registers you as the founder of an unregistered channel.
+                            This allows you to set persistent access levels, 
+                            forced modes, topics and more.
+        """
+        
         def usage():
             self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[OPERATOR ONLY] Syntax: REGISTER #channel')
         
@@ -559,36 +677,18 @@ class SQLEnforcer(ext.BaseExtension):
         def access_denied():
             self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[OPERATOR ONLY] <---- READ THIS (Access Denied)')
             
+        @defer.inlineCallbacks    
         def channel_added(*args,**kwargs):
             chan = kwargs.get('chan')
+            db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,chan.uid)
             founder = kwargs.get('founder')
             
             self.access_level_pass(users=chan.users,channel=chan)
             self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s successfully registered to: %s' % (chan.uid,founder.nick))
-            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Your channel is set to type %s as default. You can change this with the CHANTYPE command (try /msg %s HELP).' % (chan.db_type,self.factory.enforcer.nick))
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Your channel is set to type %s as default. You can change this with the CHANTYPE command (try /msg %s HELP).' % (db_channel['type'],self.factory.enforcer.nick))
             self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'You have been automatically given founder modes on %s.' % (chan.uid))
             
-        def channel_request_add(*args,**kwargs):
-            chan = kwargs.get('chan')
-            founder = kwargs.get('founder')
-            if self.sqe is not None:
-                q = self.sqe.channel_request_db_update(chan).addCallbacks(channel_added,self.query_error_callback,None,{'chan': chan,'founder': founder})
-                
-                q.callback(None)
-
-        def channel_test_exists(result,**kwargs):
-            chan = kwargs.get('chan')
-            founder = kwargs.get('founder')
-            if not result:
-                cfg = self.factory.cfg.sqlextension
-                self.factory.db.runOperation \
-                    (
-                        "INSERT INTO " + cfg.table_prefix + "_channels (name,founder_id) VALUES (%s,%s)", 
-                        [chan.uid,user.db_id]
-                    ).addCallbacks(channel_request_add,self.query_error_callback,None,{'chan': chan,'founder': founder})
-            else:
-                already_registered()
-                return
+       
                 
         if pseudoclient_uid != self.factory.enforcer.uid:
             return
@@ -615,17 +715,19 @@ class SQLEnforcer(ext.BaseExtension):
             access_denied()
             return
         
-        # Check to make 100% certain the channel is not registered
-        cfg = self.factory.cfg.sqlextension
-        self.factory.db.runQuery \
+        db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,chan.uid)
+        db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
+        
+        if not db_channel and db_user:
+            cfg = self.factory.cfg.sqlextension
+            self.factory.db.runOperation \
             (
-                "SELECT id FROM " + cfg.table_prefix + "_channels WHERE name = %s", 
-                [chan.uid]
-            ).addCallbacks(channel_test_exists,self.query_error_callback,None,{'chan': chan,'founder': user})
+                "INSERT INTO " + cfg.table_prefix + "_channels (name,founder_id) VALUES (%s,%s)", 
+                [chan.uid,db_user['id']]
+            ).addCallbacks(channel_added,self.query_error_callback,None,{'chan': chan, 'db_user': db_user, 'founder': user})
             
+        else:
+        
+            already_registered()
+            return
 
-        
-        
-        
-        #self.protocol.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,'Registering %s' % str(channel))
-        return

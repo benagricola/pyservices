@@ -1111,18 +1111,55 @@ class SpanningTree12(LineOnlyReceiver):
             
         # Check to see if the channel exists so we can modify it if it does.
         channel = self.lookup_uid(_sr.get('channel'))
-    
+        
+        
         if not channel:
             self.log.log(cll.level.ERROR,'FTOPIC attempted on non existent channel %s.' % _sr.get('channel'))
             self.st_send_error('FTOPIC attempted on non existent channel.')
             return False
+            
+        if self.execute_hook(user=None,channel=channel,topic=_sr.get('topic')):
+            channel.update_from(_sr)
         
-        self.execute_hook(channel=channel)
-        
-        channel.update_from(_sr)
         
         return True
         
+        
+    """
+        Called when we receive a TOPIC
+        command, this updates a Channel()
+        UID's topic attribute.
+        
+        http://wiki.inspircd.org/InspIRCd_Spanning_Tree_1.2/TOPIC
+        
+    """		
+    def st_receive_topic(self,prefix,args):
+        # Turn the list of fields and arguments into a keyed dictionary
+        try:
+            _sr = sr_assoc(cmd.TOPIC,args)
+        except ValueError:
+            self.log.log(cll.level.ERROR,'TOPIC command returned wrong number of arguments.')
+            self.st_send_error('TOPIC command returned wrong number of arguments.')
+            return False
+            
+        # Check to see if the channel exists so we can modify it if it does.
+        channel = self.lookup_uid(_sr.get('channel'))
+        user = self.lookup_uid(prefix)
+       
+        if not channel:
+            self.log.log(cll.level.ERROR,'TOPIC attempted on non existent channel %s.' % _sr.get('channel'))
+            self.st_send_error('TOPIC attempted on non existent channel.')
+            return False
+        
+        if not user:
+            self.log.log(cll.level.ERROR,'TOPIC change attempted by non existent user %s.' % prefix)
+            self.st_send_error('TOPIC attempted by non existent user.')
+            return False
+            
+        if self.execute_hook(user=user,channel=channel,topic=_sr.get('topic')):
+            channel.update_from(_sr)
+       
+        return True
     
     """
         Called when we receive the ADDLINE command.
@@ -1148,7 +1185,11 @@ class SpanningTree12(LineOnlyReceiver):
     def st_receive_endburst(self,prefix,args):
         self.log.log(cll.level.INFO,'Inbound network burst completed')
         if self.factory.is_bursting:
-            self.factory.is_bursting = False
+            def reset_burst():
+                self.factory.is_bursting = False
+                
+            reactor.callLater(10,reset_burst)
+            
             
             if not self.factory.connected:
                 self.reset_ping_timeout()
@@ -1157,7 +1198,8 @@ class SpanningTree12(LineOnlyReceiver):
                 self.log.log(cll.level.INFO,'Servers synchronized & connected successfully')
                 self.execute_hook(prefix,args)
         return True
-        
+    
+    
         
     """
         Called when we receive a PRIVMSG, this should
