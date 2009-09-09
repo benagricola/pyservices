@@ -161,6 +161,17 @@ class Channel(Unique):
         
     users = property(users_get,users_set,users_del)
         
+    def user_has_mode(self,user,mode):
+        if user.uid in self._users:
+            ur = self._users.get(user.uid)
+            
+            m = ur.get('modes',[])
+            
+            if mode in m:
+                return True
+                
+        return False
+        
     def modes_get(self):
         return self._modes
         

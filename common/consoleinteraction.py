@@ -114,13 +114,15 @@ class ConsoleInteraction(LineOnlyReceiver):
             self.connector.transport.protocol.quit()
             
 
-    def con_config(self,cmd,tokens):
-        if cmd == 'RELOAD':
+    def con_reload(self,cmd,tokens):
+        if cmd.startswith('CONF'):
+            self.log.log(cll.level.WARNING,'Reloading config!')
             cfg_file = self.factory.reload_config()
-            self.log.log(cll.level.INFO,'Reloaded config from %s' % cfg_file)
             return True
-        else:
-            return False
+        elif cmd.startswith('MOD'):
+            self.log.log(cll.level.WARNING,'Reloading modules!')
+            self.factory.insert_extensions(self.connector.transport.protocol)
+            return True
             
     def con_log(self,cmd,tokens):
         if cmd == 'OFF':
@@ -153,10 +155,7 @@ class ConsoleInteraction(LineOnlyReceiver):
         else:
             return False
     
-    
-    def con_reload(self,subcmd,tokens):
-        self.log.log(cll.level.WARNING,'Reloading modules!')
-        self.factory.insert_extensions(self.connector.transport.protocol)
+
         
         
     def con_list(self,cmd,tokens):

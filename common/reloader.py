@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """
 
         +-------------------------------------+
@@ -37,8 +36,8 @@ def loadreload(object):
     except:
         raise ImportError("Couldn't import module %s " % mod_name)
 
-    mod_file = inspect.getfile(object)
-    mod_path = mod_file.replace(".pyc", ".py")
+    mod_path = inspect.getsourcefile(object)
+
 
     try:
         codebase = open(mod_path, 'rU').read()

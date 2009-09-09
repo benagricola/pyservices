@@ -54,7 +54,7 @@ class SpanningTreeFactory(ReconnectingClientFactory):
     """
     modules = []
     capabilities = {}
-    loaded_extensions = []
+    loaded_extensions = {}
     
     """ 
         Initiates basic connection attempts and sets
@@ -156,7 +156,7 @@ class SpanningTreeFactory(ReconnectingClientFactory):
                 nmp.append(name)
                 
             elif issubclass(ext_l,ext.BaseExtension):
-
+                ivr = None
                 try:
                     # Create the object of this class by reloading the
                     # module if necessary, then call its init method
@@ -165,16 +165,16 @@ class SpanningTreeFactory(ReconnectingClientFactory):
                     
                     mod = reloader.loadreload(ext_l)
                     ifunc = getattr(mod, name)
-                    ifunc(connector)
+                    ivr = ifunc(connector)
                     
                 except (ImportError, RuntimeError), e:
                     self.log.log(cll.level.ERROR,'%s' % str(e))
                     
                     if name in self.loaded_extensions:
-                        self.loaded_extensions.remove(name)
+                        del self.loaded_extensions[name]
                 else:
                     if name not in self.loaded_extensions:
-                        self.loaded_extensions.append(name)
+                        self.loaded_extensions[name] = ivr
         
         self.log.log(cll.level.INFO,'Loaded %s' % ', '.join(self.loaded_extensions))
         

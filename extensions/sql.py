@@ -35,8 +35,6 @@ class SQLExtension(ext.BaseExtension):
         self.factory.pending_users = {}
         
 
-        
-        
         try:
             self.log.log(cll.level.VERBOSE,'Initializing DB connection pool...')
             
@@ -60,8 +58,6 @@ class SQLExtension(ext.BaseExtension):
             self.factory.quit()
             
 
-   
-    
     """ 
         This method is called when a runOperation callback
         is required. All it does is debug log that the 
@@ -238,21 +234,23 @@ class SQLExtension(ext.BaseExtension):
             # requiring this data to be updated before they can 
             # be executed.
             
-            d = defer.Deferred()
-            d.addCallback(lambda x: self.get_channel(channel))
-            
-            d.addCallbacks(self.update_local_channel_from_db,self.channel_update_clear_pending,[],{'channel': channel_uid})
-            d.addCallback(lambda y: self.get_channel_access_list(channel))
-            
-            d.addCallbacks(self.update_local_channel_modes_from_db,self.channel_update_clear_pending,[],{'channel': channel_uid})
-            d.addCallbacks(self.channel_update_clear_pending,self.channel_update_clear_pending,[],{'channel': channel_uid})
-      
-            
-            self.factory.pending_channels[channel_uid.uid] = d
-            self.factory.pending_channels[channel_uid.uid].callback(None)
+            self.channel_request_db_update(channel_uid).callback(None)
 
 
-            
+    def channel_request_db_update(self,channel):
+        d = defer.Deferred()
+        d.addCallback(lambda x: self.get_channel(channel.uid))
+        
+        d.addCallbacks(self.update_local_channel_from_db,self.channel_update_clear_pending,[],{'channel': channel})
+        d.addCallback(lambda y: self.get_channel_access_list(channel))
+        
+        d.addCallbacks(self.update_local_channel_modes_from_db,self.channel_update_clear_pending,[],{'channel': channel})
+        d.addCallbacks(self.channel_update_clear_pending,self.channel_update_clear_pending,[],{'channel': channel})
+  
+        
+        self.factory.pending_channels[channel.uid] = d
+        return self.factory.pending_channels[channel.uid]
+        
     
     def update_local_channel_modes_from_db(self,result,**kwargs):
         channel_uid = kwargs.get('channel')

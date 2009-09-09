@@ -32,20 +32,30 @@ class SQLEnforcer(ext.BaseExtension):
     def __init__(self,*args,**kwargs):
         super(self.__class__, self).__init__(*args,**kwargs)
     
+        self.sqe = self.factory.loaded_extensions.get('SQLExtension')
         
-        #cfg_oper_tool = self.factory.cfg.sqlextension.services.oper_tool
 
+        # Check to see if a UID for enforcer has already been created.
+        # If not, create it, otherwise don't create another one because this
+        # extension has just been reloaded.
         if not hasattr(self.factory,'enforcer') or not self.factory.enforcer:
             self.create_enforcer()
 
-            
+        #cfg_oper_tool = self.factory.cfg.sqlextension.services.oper_tool
         #self.oper_tool = self.protocol.st_add_pseudoclient(cfg_oper_tool.nick,cfg_oper_tool.host,cfg_oper_tool.ident,'+iow',cfg_oper_tool.realname,self,'oper')
         
    
+    """
+        Calls the factory method to create a pseudoclient for this
+        extension. This pseudoclient will be added as a UID during
+        our outbound network BURST on connect, creating a fake 
+        client which we can receive commands for.
+    """  
     def create_enforcer(self):
         cfg_enforcer = self.factory.cfg.sqlextension.services.enforcer
         self.factory.enforcer = self.protocol.st_add_pseudoclient(cfg_enforcer.nick,cfg_enforcer.host,cfg_enforcer.ident,'+iow',cfg_enforcer.realname,self)
-        
+     
+     
     """ 
         This method is called when a runOperation callback
         is required. All it does is debug log that the 
@@ -65,14 +75,6 @@ class SQLEnforcer(ext.BaseExtension):
         self.log.log(cll.level.DATABASE,'Query encountered error: %s' % error.value)
         return True
         
-        
-    """
-        Hooks into the st_send_burst method allowing the extension to insert 
-        its own pseudo-client UID's into the burst. This allows us to fake 
-        network clients for the purposes of services.
-    """
-    def st_send_burst(self):
-       pass
         
     """
         Called on a timeout after a ban, this
@@ -192,11 +194,9 @@ class SQLEnforcer(ext.BaseExtension):
     def access_level_pass(self,*args,**kwargs):
         users = kwargs.get('users')
         channel = kwargs.get('channel')
-       
-        
+
         if not channel or not users:
             return 
-    
 
         # Check if channel has a founder first 
         if not hasattr(channel,'db_founder_id'):
@@ -223,6 +223,13 @@ class SQLEnforcer(ext.BaseExtension):
                 self.enforce_modes(user=user,channel=channel,public=True)	
                     
     
+    """
+        This command is hooked when someone joins a channel.
+        If the channel is still pending an update via database,
+        we add a callback to the database update and return.
+        Otherwise, we execute an access level pass over the 
+        channel.
+    """
     def st_receive_fjoin(self,timestamp,channel,users,modes):
 
         channel_uid = self.protocol.lookup_uid(channel)
@@ -240,6 +247,14 @@ class SQLEnforcer(ext.BaseExtension):
         return True  
 
         
+    """
+        This is called when we receive a new UID from the peer server,
+        either during the connect sequence or when a new client is 
+        introduced. If the user lookup is still pending, we add a
+        callback on the query and return, otherwise we trigger
+        a welcome which notifies users of their current global
+        access level.
+    """
     def st_receive_uid(self,**kwargs):
         user = kwargs.get('user')
       
@@ -254,7 +269,11 @@ class SQLEnforcer(ext.BaseExtension):
         
         self.user_trigger_welcome(user=user)
         
-        
+    
+    """
+        Gives the user a welcome message and executes any autojoins that they may
+        have.
+    """
     def user_trigger_welcome(self,*args,**kwargs):
         user = kwargs.get('user')
         if user:
@@ -270,6 +289,10 @@ class SQLEnforcer(ext.BaseExtension):
         return True
           
      
+    """
+        Handles Enforcer CHANLEVEL command, using internal functions for error output
+        and initial docstring for HELP output.
+    """
     def ps_privmsg_chanlevel(self,command,message,pseudoclient_uid,source_uid):
         """
             Usage:          CHANLEVEL #channel MIN|VOICE|HOP|OP|SOP <1-100> 
@@ -280,23 +303,25 @@ class SQLEnforcer(ext.BaseExtension):
         """
         
         def usage():
-            self.protocol.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] (USERLEVEL) Usage: CHANLEVEL #channel MIN|VOICE|HOP|OP|SOP <1-100>')
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] (USERLEVEL) Usage: CHANLEVEL #channel MIN|VOICE|HOP|OP|SOP <1-100>')
             
         def no_change(chan,type,level):
-            self.protocol.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,'Channel %s already has %s access level of %s' % (chan,type,level))
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s already has %s access level of %s' % (chan,type,level))
             
         def access_denied():
-            self.protocol.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] <---- READ THIS (Access Denied)')
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] <---- READ THIS (Access Denied)')
             
         def level_updated(*args,**kwargs):
-            self.protocol.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,'Channel %s %s access level set to: %s' % (kwargs.get('chan'),kwargs.get('type'),kwargs.get('level')))
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s %s access level set to: %s' % (kwargs.get('chan'),kwargs.get('type'),kwargs.get('level')))
             
         def conflicting_mode(*args):
-            self.protocol.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,'[ERROR] %s level (%s) may not be below that of %s (%s)' % args)
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[ERROR] %s level (%s) may not be below that of %s (%s)' % args)
             
         channel_name = ''
         new_level = ''
         
+        # Attempt to split message into arguments, cast them
+        # if required and check them for validity.
         try:
         
             channel_name,type,new_level = message.split(' ')
@@ -313,21 +338,29 @@ class SQLEnforcer(ext.BaseExtension):
             usage()
             return False
         
+        # Look up the channel and the user UID in question
         channel = self.protocol.lookup_uid(channel_name)
         user = self.protocol.lookup_uid(source_uid)
             
+        # If either of them don't exist, show usage
         if not channel or not user:
             usage()
             return False
             
-        if channel.db_min_level == new_level:
-            no_change(channel.uid,type,new_level)
-            return False
             
+        # If user is not the channel founder, show message
         if channel.db_founder_id != user.db_id:
             access_denied()
             return False
             
+            
+        # If there is no change to the level, show message
+        if channel.db_min_level == new_level:
+            no_change(channel.uid,type,new_level)
+            return False
+            
+        # Otherwise set value based on TYPE field
+        # !!! TODO: Clean this up somehow, it's ugly
         if type in ('MIN'):
             if new_level > channel.db_level_voice:
                 conflicting_mode('VOICE',channel.db_level_voice,'MIN',new_level)
@@ -378,6 +411,8 @@ class SQLEnforcer(ext.BaseExtension):
             channel.db_level_superop = new_level
             db_field = 'level_superop'
             
+        # Update the db with the level from local data, then run an access pass
+        # over the channel to change modes on all users if required
         cfg = self.factory.cfg.sqlextension
         self.factory.db.runOperation \
             (
@@ -389,7 +424,10 @@ class SQLEnforcer(ext.BaseExtension):
         
         return False
         
-             
+    """
+        Provides help command support for the Enforcer 
+        pseudoclient.
+    """
     def ps_privmsg_help(self,command,message,pseudoclient_uid,source_uid):
         """
             Usage:          HELP [COMMAND]
@@ -406,27 +444,30 @@ class SQLEnforcer(ext.BaseExtension):
             m = tools.get_docstring(self.__class__,'ps_privmsg_',message)
             
             if m is True:
-                self.protocol.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,'There is more than one command matching %s, please be more specific.' % message.upper())
+                self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'There is more than one command matching %s, please be more specific.' % message.upper())
             elif m is False or m is None:
-                self.protocol.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,'No help for %s available.' % message.upper())
+                self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'No help for %s available.' % message.upper())
             
             elif m is not None:
                 line = m.split('\n')
                 for l in line:
-                    self.protocol.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,l)
+                    self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,l)
             
             
         else:
             mlist = tools.find_names(self.__class__,r'(?i)^ps_privmsg_.+$')
             
-            self.protocol.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,'The following commands are available by messaging (/msg) %s:' % self.factory.enforcer.nick)
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'The following commands are available by messaging (/msg) %s:' % self.factory.enforcer.nick)
             for method in mlist:
                 cmd_name = method.split('_').pop().upper()
-                self.protocol.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,' ' + cmd_name)
+                self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,' ' + cmd_name)
         
         return True
         
         
+    """
+        Set the channel type of a channel
+    """
     def ps_privmsg_chantype(self,command,message,pseudoclient_uid,source_uid):
         """
             Usage:          CHANTYPE #channel [PUBLIC_]USERLEVEL|ACCESSLIST
@@ -447,16 +488,16 @@ class SQLEnforcer(ext.BaseExtension):
         """
         
         def usage():
-            self.protocol.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] Syntax: CHANTYPE #channel [PUBLIC_]USERLEVEL|ACCESSLIST')
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] Syntax: CHANTYPE #channel [PUBLIC_]USERLEVEL|ACCESSLIST')
         
         def no_change(chan,type):
-            self.protocol.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,'Channel %s already has type %s' % (chan,type))
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s already has type %s' % (chan,type))
         
         def access_denied():
-            self.protocol.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] <---- READ THIS (Access Denied)')
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] <---- READ THIS (Access Denied)')
             
         def type_updated(*args,**kwargs):
-            self.protocol.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,'Channel %s type changed to: %s' % (kwargs.get('chan'),kwargs.get('type')))
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s type changed to: %s' % (kwargs.get('chan'),kwargs.get('type')))
         
         if pseudoclient_uid != self.factory.enforcer.uid:
             return
@@ -473,22 +514,22 @@ class SQLEnforcer(ext.BaseExtension):
             
         except ValueError:
             usage()
-            return False
+            return
         
         channel = self.protocol.lookup_uid(channel_name)
         user = self.protocol.lookup_uid(source_uid)
             
         if not channel or not user:
             usage()
-            return False
+            return
             
         if channel.db_type == new_type:
             no_change(channel.uid,new_type)
-            return False
+            return
             
         if channel.db_founder_id != user.db_id:
             access_denied()
-            return False
+            return
         
 
         channel.db_type = new_type.upper()
@@ -502,31 +543,89 @@ class SQLEnforcer(ext.BaseExtension):
         
         self.access_level_pass(users=channel.users,channel=channel)
         
-        return False
+        return True
         
         
     def ps_privmsg_register(self,source_uid,command,message,pseudoclient_uid):
-        def no_channel(chan):
-            self.protocol.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,'Channel %s does not exist' % (chan))
+        def usage():
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[OPERATOR ONLY] Syntax: REGISTER #channel')
+        
+        def no_channel():
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s does not exist' % (message))
+        
+        def already_registered():
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s is already registered' % (message))
+         
+        def access_denied():
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[OPERATOR ONLY] <---- READ THIS (Access Denied)')
             
+        def channel_added(*args,**kwargs):
+            chan = kwargs.get('chan')
+            founder = kwargs.get('founder')
+            
+            self.access_level_pass(users=chan.users,channel=chan)
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s successfully registered to: %s' % (chan.uid,founder.nick))
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Your channel is set to type %s as default. You can change this with the CHANTYPE command (try /msg %s HELP).' % (chan.db_type,self.factory.enforcer.nick))
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'You have been automatically given founder modes on %s.' % (chan.uid))
+            
+        def channel_request_add(*args,**kwargs):
+            chan = kwargs.get('chan')
+            founder = kwargs.get('founder')
+            if self.sqe is not None:
+                q = self.sqe.channel_request_db_update(chan).addCallbacks(channel_added,self.query_error_callback,None,{'chan': chan,'founder': founder})
+                
+                q.callback(None)
+
+        def channel_test_exists(result,**kwargs):
+            chan = kwargs.get('chan')
+            founder = kwargs.get('founder')
+            if not result:
+                cfg = self.factory.cfg.sqlextension
+                self.factory.db.runOperation \
+                    (
+                        "INSERT INTO " + cfg.table_prefix + "_channels (name,founder_id) VALUES (%s,%s)", 
+                        [chan.uid,user.db_id]
+                    ).addCallbacks(channel_request_add,self.query_error_callback,None,{'chan': chan,'founder': founder})
+            else:
+                already_registered()
+                return
+                
         if pseudoclient_uid != self.factory.enforcer.uid:
             return
         
-        channel = message
+        channel = message.lower()
         # First make sure the channel name is valid
         if not channel.startswith('#'):
             usage()
-            return False
+            return 
    
         chan = self.protocol.lookup_uid(message)
-        
+        user = self.protocol.lookup_uid(source_uid)
         # Make sure the channel exists
-        if not channel:
-            no_channel(channel)
-            return False
-             
+        if not chan:
+            no_channel()
+            return
+        
+        if not user:
+            usage()
+            return
+            
         # Check to see if the user is an OP on that channel
-        pprint(chan)
-             
-        self.protocol.st_send_command('PRIVMSG',[source_uid.uid],pseudoclient_uid,'Registering %s' % str(channel))
-        return True
+        if not chan.user_has_mode(user,'o'):
+            access_denied()
+            return
+        
+        # Check to make 100% certain the channel is not registered
+        cfg = self.factory.cfg.sqlextension
+        self.factory.db.runQuery \
+            (
+                "SELECT id FROM " + cfg.table_prefix + "_channels WHERE name = %s", 
+                [chan.uid]
+            ).addCallbacks(channel_test_exists,self.query_error_callback,None,{'chan': chan,'founder': user})
+            
+
+        
+        
+        
+        #self.protocol.st_send_command('PRIVMSG',[source_uid],pseudoclient_uid,'Registering %s' % str(channel))
+        return
