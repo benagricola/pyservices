@@ -91,8 +91,7 @@ class SQLEnforcer(ext.BaseExtension):
         def send_removal(value,cur_value,threshold):
             self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,cfg_bad_behaviour.removed % (value,cur_value,threshold))
               
-        def remove_bad_behaviour(*args):
-            print args
+        def remove_bad_behaviour(user,value):
             if user.uid in self.bad_behaviour_reg:
                 cur_val = self.bad_behaviour_reg.get(user.uid)
                 
@@ -110,7 +109,7 @@ class SQLEnforcer(ext.BaseExtension):
         if user.uid not in self.bad_behaviour_reg:
             self.bad_behaviour_reg[user.uid] = value
             send_warning(self.bad_behaviour_reg[user.uid],cfg_bad_behaviour.threshold)
-            reactor.callLater(timeout, remove_bad_behaviour,[user,value])
+            reactor.callLater(timeout, remove_bad_behaviour,user,value)
             return False
         else:
             cur_val = self.bad_behaviour_reg.get(user.uid)
