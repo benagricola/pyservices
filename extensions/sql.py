@@ -183,7 +183,7 @@ class SQLExtension(ext.BaseExtension):
         trans.execute \
         (
             " SELECT"
-            " r.id as id, r.level as level, r.approved as approved,"
+            " r.id as id, r.username as username, r.level as level, r.approved as approved,"
             " (SELECT"
                 " GROUP_CONCAT(c.name SEPARATOR ',')"
                 " FROM " 
@@ -204,10 +204,12 @@ class SQLExtension(ext.BaseExtension):
         trans.execute \
         (   " SELECT "
                 " c.id as id, c.founder_id as founder_id, c.topic as topic,"
-                " c.type as type, c.min_level as min_level,"
-                " c.level_voice as level_voice, c.level_halfop as level_halfop,"
-                " c.level_op as level_op, c.level_superop as level_superop,"
-                " c.level_settings as level_settings, u.username as founder_name" 
+                " c.topic_protection as topic_protection, c.type as type," 
+                " c.min_level as min_level, c.level_voice as level_voice,"
+                " c.level_halfop as level_halfop, c.level_op as level_op,"
+                " c.level_superop as level_superop,"
+                " c.level_settings as level_settings,"
+                " u.username as founder_name" 
             " FROM " + cfg.table_prefix + "_channels c" 
             " LEFT JOIN " + cfg.table_prefix + "_users u"
             " ON (c.founder_id = u.id)"
@@ -220,15 +222,16 @@ class SQLExtension(ext.BaseExtension):
         trans.execute \
         (    
             " SELECT "
-                " a.user_id, a.access_level"
+                " a.user_id, a.access_level, u.username"
             " FROM " + cfg.table_prefix + "_channel_access a," 
-            " " + cfg.table_prefix + "_channels c" 
-            " WHERE c.name = %s AND c.id = channel_id ORDER BY a.access_level DESC",name
+            " " + cfg.table_prefix + "_channels c,"
+            " " + cfg.table_prefix + "_users u"             
+            " WHERE c.name = %s AND c.id = a.channel_id AND u.id = a.user_id ORDER BY a.access_level DESC",name
         )
         d = {}
         
         for x in trans.fetchall():
-            d[x['user_id']] = x['access_level']
+            d[x['user_id']] = {'username': x['username'] ,'access_level': x['access_level']}
             
         return d
             

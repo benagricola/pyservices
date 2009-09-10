@@ -139,6 +139,18 @@ def word_wrap(string, width=80, offset=0):
         
         
         
+def pad(string,length = 30,left = False):
+
+    if len(string) < length:
+        m = length - len(string)
+    
+        if left:
+            return (m * " ") + string
+        else:
+            return string + (m * " ")
+        
+    else:
+        return string
 
 """
 Returns a string containing the name 

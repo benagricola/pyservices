@@ -17,29 +17,31 @@ import itertools
     'Enumerates' a set of items for use as constants
     elsewhere in the application.
 """
-class Enumerate(object):
-    def __init__(self, names):
-        for number, name in enumerate(names.split()):
-            setattr(self, name, number)
+class CMDTypes(object):
+    def __init__(self):
+        sr_fields = {}
+        sr_fields['SERVER'] 	= ['name','password','hops','uid','description']
+        sr_fields['OPERTYPE'] 	= ['type']
+        sr_fields['UID'] 		= ['uid','timestamp','nick','hostname','displayed_hostname','ident','ip','signed_on','modes','parameters','gecos']
+        sr_fields['METADATA'] 	= ['uid','name','value']
+        sr_fields['FJOIN'] 		= ['channel','timestamp','modes','parameters','users']
+        sr_fields['FHOST'] 		= ['hostname']
+        sr_fields['FMODE'] 		= ['target','timestamp','modes','parameters']
+        sr_fields['FTOPIC'] 	= ['channel','topic_time','topic_set_by','topic']
+        sr_fields['TOPIC'] 		= ['channel','topic']
+        sr_fields['PRIVMSG'] 	= ['uid','message']
+        sr_fields['MODE'] 		= ['target','modes','parameters']
+        sr_fields['PART'] 		= ['channel','reason']
+        sr_fields['QUIT'] 		= ['reason']
+        
+        for name, value in sr_fields.items():
+            setattr(self, name, value)
 
 # This is where we set which keywords to enumerate
-cmd = Enumerate('SERVER UID OPERTYPE METADATA FJOIN FHOST FMODE FTOPIC TOPIC PRIVMSG MODE PART QUIT')
+cmd = CMDTypes()
 
 # This is where we set the field names and numbers we expect to find for a specified "SR" (Argument Parsing) type
-sr_fields = {}
-sr_fields[cmd.SERVER] 		= ['name','password','hops','uid','description']
-sr_fields[cmd.OPERTYPE] 	= ['type']
-sr_fields[cmd.UID] 			= ['uid','timestamp','nick','hostname','displayed_hostname','ident','ip','signed_on','modes','parameters','gecos']
-sr_fields[cmd.METADATA] 	= ['uid','name','value']
-sr_fields[cmd.FJOIN] 		= ['channel','timestamp','modes','parameters','users']
-sr_fields[cmd.FHOST] 		= ['hostname']
-sr_fields[cmd.FMODE] 		= ['target','timestamp','modes','parameters']
-sr_fields[cmd.FTOPIC] 		= ['channel','topic_time','topic_set_by','topic']
-sr_fields[cmd.TOPIC] 		= ['channel','topic']
-sr_fields[cmd.PRIVMSG] 		= ['uid','message']
-sr_fields[cmd.MODE] 		= ['target','modes','parameters']
-sr_fields[cmd.PART] 		= ['channel','reason']
-sr_fields[cmd.QUIT] 		= ['reason']
+
 
 def sr_reduce(args,required,ignore_reduce,ignore_gecos):
     if len(args) > required:
@@ -80,9 +82,9 @@ def sr_reduce(args,required,ignore_reduce,ignore_gecos):
     
     
 def sr_assoc(cmdtype,args,ignore_reduce=False,ignore_gecos=True):
-    _sr_fields = sr_fields.get(cmdtype)
+    _sr_fields = cmdtype
     
-    
+
     args = sr_reduce(args,len(_sr_fields),ignore_reduce,ignore_gecos)
     
 

@@ -22,6 +22,8 @@ from twisted.enterprise import adbapi
 from twisted.internet import reactor
 from twisted.internet import defer
 
+
+
 """
     Acts as a container for extension functions which
     hook into the command delegation process.
@@ -89,7 +91,8 @@ class SQLEnforcer(ext.BaseExtension):
         def send_removal(value,cur_value,threshold):
             self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,cfg_bad_behaviour.removed % (value,cur_value,threshold))
               
-        def remove_bad_behaviour(user,value):
+        def remove_bad_behaviour(*args):
+            print args
             if user.uid in self.bad_behaviour_reg:
                 cur_val = self.bad_behaviour_reg.get(user.uid)
                 
@@ -121,7 +124,7 @@ class SQLEnforcer(ext.BaseExtension):
             else:
                 
                 send_warning(self.bad_behaviour_reg[user.uid],cfg_bad_behaviour.threshold)
-                reactor.callLater(timeout, remove_bad_behaviour,[user,value])
+                reactor.callLater(timeout, remove_bad_behaviour,user,value)
                 return False
         
         
@@ -138,7 +141,8 @@ class SQLEnforcer(ext.BaseExtension):
          
         def topic_updated(*args,**kwargs):
             channel = kwargs.get('channel')
-            self.protocol.st_send_command('NOTICE',[channel],self.factory.enforcer.uid,'Persistent topic updated by founder')
+            user = kwargs.get('user')
+            self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,'%s topic updated.' % channel)
             
         db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,channel.uid)
         
@@ -150,7 +154,7 @@ class SQLEnforcer(ext.BaseExtension):
         if db_channel:
             db_topic = db_channel.get('topic')
             
-            if db_topic and db_topic != topic:
+            if db_topic and db_topic != topic and db_channel['topic_protection']:
                 
                 if not db_user:
                     # User not found, this probably means this came from a network burst FTOPIC
@@ -170,7 +174,7 @@ class SQLEnforcer(ext.BaseExtension):
                         (
                             "UPDATE " + cfg.table_prefix + "_channels SET topic = %s WHERE id = %s LIMIT 1", 
                             [topic,db_channel['id']]
-                        ).addCallbacks(topic_updated,self.query_error_callback,None,{'channel': channel.uid})
+                        ).addCallbacks(topic_updated,self.query_error_callback,None,{'channel': channel.uid,'user': user})
                     
 
                     
@@ -214,9 +218,10 @@ class SQLEnforcer(ext.BaseExtension):
             effective_level = 100
 
         elif db_channel['type'] in ('ACCESSLIST','PUBLIC_ACCESSLIST'): 
-            
-            effective_level = db_accesslist.get(db_user['id'],0)
-                  
+            if db_user['id'] in db_accesslist:
+                effective_level = db_accesslist[db_user['id']].get('access_level',0)
+            else:
+                effective_level = 0
         else:
              effective_level = db_user['level']
         
@@ -224,6 +229,7 @@ class SQLEnforcer(ext.BaseExtension):
         # First check if users' level is equal or more
         # than the minimum level for this channel, otherwise
         # remove them if the channel is not public
+       
         if effective_level < db_channel['min_level'] and not public:
         
             banmask = '*!*@%s' % user.displayed_hostname
@@ -400,19 +406,21 @@ class SQLEnforcer(ext.BaseExtension):
     @defer.inlineCallbacks
     def ps_privmsg_chanlevel(self,command,message,pseudoclient_uid,source_uid):
         """
-            Usage:          CHANLEVEL #channel MIN|VOICE|HOP|OP|SOP <1-100> 
+            Usage:          CHANLEVEL #channel MIN|VOICE|HOP|OP|SOP|SET <1-100> 
             Access:         FOUNDER ONLY
             Description:    Sets the minimum levels on a channel to be 
                             automatically granted access, voice, halfop, op,
-                            or protected op respectively.
+                            or protected op respectively. Any user with a
+                            user level above the 'SET' minimum will be allowed
+                            to manage the channel access list. SET defaults to
+                            100 on channel creations so only SOP users and 
+                            founders may manage the channel access list or 
+                            other settings.
         """
         
         def usage():
             self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] (USERLEVEL) Usage: CHANLEVEL #channel MIN|VOICE|HOP|OP|SOP <1-100>')
-            
-        def no_change(chan,type,level):
-            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s already has %s access level of %s' % (chan,type,level))
-            
+                
         def access_denied():
             self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] <---- READ THIS (Access Denied)')
             
@@ -429,11 +437,14 @@ class SQLEnforcer(ext.BaseExtension):
         # if required and check them for validity.
         try:
         
-            channel_name,type,new_level = message.split(' ')
+
+
+            channel_name,type,new_level = message.split(' ',3)
+   
             new_level = int(new_level)
             type = type.upper()
             
-            if type not in ('MIN','VOICE','HOP','OP','SOP'):
+            if type not in ('MIN','VOICE','HOP','OP','SOP','SET'):
                 raise ValueError('Invalid Value')
                 
             if new_level < 1 or new_level > 100:
@@ -455,21 +466,22 @@ class SQLEnforcer(ext.BaseExtension):
         db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,channel.uid)
         db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
         
+        if not db_user or not db_channel:
+            usage()
+            return
+            
         # If user is not the channel founder, show message
         if db_channel['founder_id'] != db_user['id']:
             access_denied()
             return 
-            
-            
-        # If there is no change to the level, show message
-        if db_channel['min_level'] == new_level:
-            no_change(channel.uid,type,new_level)
-            return 
-            
-            
+          
         # Otherwise set value based on TYPE field
         # !!! TODO: Clean this up somehow, it's ugly
-        if type in ('MIN'):
+        
+        if type in ('SET'):
+            db_field = 'level_settings'
+            
+        elif type in ('MIN'):
             if new_level > db_channel['level_voice']:
                 conflicting_mode('VOICE',db_channel['level_voice'],'MIN',new_level)
                 return
@@ -518,6 +530,7 @@ class SQLEnforcer(ext.BaseExtension):
                 
             db_field = 'level_superop'
             
+      
             
         # Update the db with the level from local data, then run an access pass
         # over the channel to change modes on all users if required
@@ -634,6 +647,7 @@ class SQLEnforcer(ext.BaseExtension):
         
         db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,channel.uid)
         db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
+        
         # If user is not the channel founder, show message
         if db_channel['founder_id'] != db_user['id']:
             access_denied()
@@ -655,6 +669,289 @@ class SQLEnforcer(ext.BaseExtension):
         return
         
         
+    @defer.inlineCallbacks    
+    def ps_privmsg_chantopic(self,source_uid,command,message,pseudoclient_uid):
+        """
+            Usage:          CHANTOPIC #channel ENFORCE <1|0> | TOPIC <text>
+            Access:         FOUNDER ONLY
+            Description:    Allows you to change settings related to a channels'
+                            topic on channels you own.
+                            
+            ENFORCE:        With a value of 1 or 0, this turns topic enforcing
+                            on and off. If enforce is on, only the founder is
+                            able to modify the topic and if the bad_behaviour
+                            functionality is enabled, anyone changing the topic
+                            will be warned and possibly killed.
+            
+            TOPIC:          Sets the text of the topic to be enforced. This can
+                            also be set implicitly if the channel founder changes
+                            the channel topic using /TOPIC while enforcement
+                            is in effect.
+        """
+        
+        def usage():
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] Syntax: CHANTOPIC #channel ENFORCE <1|0> | TOPIC <text>')
+        
+        def no_change(chan,function,value):
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s value CHANTOPIC %s already has value %s' % (chan,function,type))
+        
+        def no_channel():
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s does not exist' % (message))
+         
+        def access_denied():
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] <---- READ THIS (Access Denied)')
+          
+        def topic_updated(*args,**kwargs):
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s value CHANTOPIC %s changed to %s' % (kwargs.get('chan'),kwargs.get('function'),kwargs.get('value')))
+            
+                  
+        if pseudoclient_uid != self.factory.enforcer.uid:
+            return
+        
+        try:
+        
+            channel_name,function,value = message.split(' ',3)
+            function = function.upper()
+            
+            if function not in ('TOPIC','ENFORCE'):
+                raise ValueError('Invalid Type')
+            else:
+                if function == 'ENFORCE':
+                    value = int(value)
+                    if value > 1 or value < 0:
+                        usage()
+                        return
+                        
+                    db_field = 'topic_protection'
+                    
+                elif function == 'TOPIC':
+                    # TOPIC should already be a string
+                    db_field = 'topic'
+                    
+                    
+        except ValueError:
+            usage()
+            return
+            
+        channel = channel_name.lower()
+        # First make sure the channel name is valid
+        if not channel.startswith('#'):
+            usage()
+            return 
+   
+        chan = self.protocol.lookup_uid(channel)
+        user = self.protocol.lookup_uid(source_uid)
+        # Make sure the channel exists
+        if not chan:
+            no_channel()
+            return
+        
+        if not user:
+            usage()
+            return 
+            
+        db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,chan.uid)
+        db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
+        
+        # If user is not the channel founder, show message
+        if db_channel['founder_id'] != db_user['id']:
+            access_denied()
+            return   
+            
+        if db_channel['topic_protection'] == value:
+            no_change(chan.uid,function,value)
+            return
+
+
+        cfg = self.factory.cfg.sqlextension
+        self.factory.db.runOperation \
+            (
+                "UPDATE " + cfg.table_prefix + "_channels SET " + db_field + " = %s WHERE id = %s LIMIT 1", 
+                [value,db_channel['id']]
+            ).addCallbacks(topic_updated,self.query_error_callback,None,{'chan': chan.uid,'function': function,'value': value})
+
+        
+        return
+            
+    
+    @defer.inlineCallbacks    
+    def ps_privmsg_chanacc(self,source_uid,command,message,pseudoclient_uid):
+        """
+            Usage:          CHANACC #channel ADD | DEL | LIST <nick | search_string> [<1-100>]
+            Access:         BASED ON CHANNEL 'SETTINGS' LEVEL
+            Description:    Allows you to list and modify the access list for 
+                            a channel. You can explicitly set access levels for 
+                            each user when the channel is set to ACCESSLIST or 
+                            PUBLIC_ACCESSLIST. When the channel is set to 
+                            USERLEVEL or PUBLIC_USERLEVEL, this access list will
+                            not be used.
+                            
+            Note:           A nickname and access value, corresponding to the 
+                            levels set using CHANLEVEL must be given for a 
+                            CHANACC ADD, a search string must be given for a
+                            CHANACC LIST (may be * for all), and a nickname 
+                            must be given for CHANACC DEL.
+        """
+        
+        def usage():
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[TRUSTED ONLY] Syntax: REGISTER #channel')
+        
+        def no_channel(channel):
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s does not exist' % (channel))
+        
+        def no_user(user):
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'User %s does not exist' % (user))
+         
+        def access_denied():
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[TRUSTED ONLY] <---- READ THIS (Access Denied)')
+         
+        def too_high():
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'You may not modify users at or above YOUR access level!')
+           
+        def no_founder():
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'You may not add the channel founder to the access list - s/he already has level 100 access')
+            
+           
+        def user_added(*args,**kwargs):
+            chan = kwargs.get('chan')
+            user = kwargs.get('user')
+            level = kwargs.get('level')
+           
+            self.access_level_pass(users=chan.users,channel=chan)
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'User %s added to %s access list at level %s' % (user['username'],chan.uid,level))
+
+        def user_deleted(*args,**kwargs):
+            chan = kwargs.get('chan')
+            user = kwargs.get('user')
+
+            self.access_level_pass(users=chan.users,channel=chan)
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'User %s deleted from %s access list ' % (user['username'],chan.uid))
+       
+                
+        if pseudoclient_uid != self.factory.enforcer.uid:
+            return
+        
+        try:
+        
+            lx = message.split(' ')
+          
+            if len(lx) == 4:
+                channel_name,function,string,value = lx
+                value = int(value)
+                
+            elif len(lx) == 3:
+                channel_name,function,string = lx
+                value = -1
+            else:
+                usage()
+                return
+                
+            function = function.upper()
+            channel_name = channel_name.lower()
+            
+            if function not in ('ADD','DEL','LIST'):
+                raise ValueError('Invalid Type')
+       
+        except ValueError:
+            usage()
+            return
+        
+       
+        # First make sure the channel name is valid
+        if not channel_name.startswith('#'):
+            usage()
+            return 
+   
+        chan = self.protocol.lookup_uid(channel_name)
+        user = self.protocol.lookup_uid(source_uid)
+        # Make sure the channel exists
+        if not chan:
+            no_channel(chan.uid)
+            return
+        
+        if not user:
+            usage()
+            return
+       
+
+        db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,chan.uid)
+        db_channel_accesslist = yield self.factory.db.runInteraction(self.sqe.get_channel_accesslist,chan.uid)
+        db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
+        
+        
+        if not db_channel or not db_user:
+            return
+            
+            
+        # If user is not the channel founder, proceed to more rigorous access checks
+        if db_channel['founder_id'] != db_user['id']:
+            
+            if db_user['id'] not in db_channel_accesslist:
+                access_denied()
+                return
+                
+            access = db_channel_accesslist[db_user['id']].get('access_level',0)
+
+            
+            if access < db_channel['level_settings']:
+                access_denied()
+                return
+        else:
+            access = 101
+        
+       
+        cfg = self.factory.cfg.sqlextension 
+        if function in ('ADD','DEL'):
+            db_add_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,string)
+            
+            if not db_add_user:
+                no_user(string)
+                return
+            
+            if db_add_user['id'] == db_channel['founder_id']:
+                no_founder()
+                return
+            
+            if function == 'ADD':
+                if value >= access:
+                    too_high()
+                    return
+                self.factory.db.runOperation \
+                (
+                    "INSERT INTO " + cfg.table_prefix + "_channel_access"
+                    " (channel_id,user_id,access_level)"
+                    " VALUES (%s,%s,%s)"
+                    " ON DUPLICATE KEY UPDATE channel_id = VALUES(channel_id), user_id = VALUES(user_id), access_level = VALUES(access_level)", 
+                    [db_channel['id'],db_add_user['id'],value]
+                ).addCallbacks(user_added,self.query_error_callback,None,{'chan': chan, 'user': db_add_user, 'level': value})
+            
+            elif function == 'DEL':
+                if value >= access:
+                    too_high()
+                    return
+                self.factory.db.runOperation \
+                (
+                    "DELETE FROM " + cfg.table_prefix + "_channel_access"
+                    " WHERE channel_id = %s AND user_id = %s LIMIT 1", 
+                    [db_channel['id'],db_add_user['id']]
+                ).addCallbacks(user_deleted,self.query_error_callback,None,{'chan': chan, 'user': db_add_user})
+            else:
+                usage()
+                return
+                
+        elif function == 'LIST':
+           
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Access List for %s:' % (chan.uid))
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,(tools.pad('  Nick' ,30) + ' Access Level'))
+            # Show founder since it doesn't actually exist in the db
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,(tools.pad('  %s' % db_channel['founder_name'],30) + ' %s' % 100))
+
+            for name,value in db_channel_accesslist.items():
+                
+                self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,(tools.pad('  %s' % value.get('username'),30) + ' %s' % value.get('access_level',0)))
+
+
+            
     @defer.inlineCallbacks    
     def ps_privmsg_register(self,source_uid,command,message,pseudoclient_uid):
         """
