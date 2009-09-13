@@ -316,19 +316,70 @@ class SQLEnforcer(ext.BaseExtension):
             # Channel is not registered, ignore it
             return
         
-        # Get all users at once so not to spam queries
-        user_nicks = [user['instance'].nick for user in users.values()]
-        
-        db_users = yield self.factory.db.runInteraction(self.sqe.get_users_complete,user_nicks)
-        
-        for uitem in users.values():
-            user = uitem.get('instance')
-            modes = uitem.get('modes')
-            
-            db_user = db_users.get(user.nick,None)
-            self.enforce_modes(user,db_user,channel,db_channel,db_accesslist)
-                
 
+        if isinstance(users,dict):
+            # Get all users at once so not to spam queries
+            user_nicks = [user['instance'].nick for user in users.values()]
+        
+            db_users = yield self.factory.db.runInteraction(self.sqe.get_users_complete,user_nicks)
+            
+            for uitem in users.values():
+                user = uitem.get('instance')
+                modes = uitem.get('modes')
+                
+                db_user = db_users.get(user.nick,None)
+                self.enforce_modes(user,db_user,channel,db_channel,db_accesslist)
+                
+        else:   
+            user = users
+            db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
+            self.enforce_modes(user,db_user,channel,db_channel,db_accesslist)
+            
+
+    """
+        This command is hooked when a mode is set.
+    """
+    @defer.inlineCallbacks
+    def st_receive_fmode(self,channel,timestamp,modes):
+
+
+        if not channel:
+            self.log.log(cll.level.ERROR,'We received a hook FMODE but the channel could not be looked up by UID :wtc:')
+            return
+        
+        db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,channel.uid)
+            
+        if not db_channel:
+            # Channel is not registered, ignore it
+            return
+                
+        db_channel_modes = yield self.factory.db.runInteraction(self.sqe.get_channel_modes,channel.uid)    
+
+        # If channel wants to enforce user modes, loop over all applied modes
+        # Looking for prefix modes, then run an access pass over each user
+        # whos' prefix mode has changed, using passed to record which users
+        # we have run an access level pass on (so we dont run multiples for 
+        # multiple mode changes.
+        passed = []
+        ump = db_channel.get('user_mode_protection',0) 
+        cmp = db_channel.get('channel_mode_protection',0) 
+        
+        for mode, param in tools.applied_modes(modes).items():
+            _type = self.protocol.lookup_mode_type(mode,channel)
+            
+            # Mode change was on a prefix (qaohv) mode and has not been ran yet
+            if tools.contains_any('X',_type) and param not in passed and ump:
+                passed.append(param)
+                self.access_level_pass(users=param,channel=channel)
+            elif cmp:
+                # Mode was a channel mode, and channel mode protection is on
+                # Not implemented yet.
+                pass
+ 
+        
+        
+
+                
     """
         This command is hooked when someone joins a channel.
     """
@@ -337,19 +388,26 @@ class SQLEnforcer(ext.BaseExtension):
 
         channel_uid = self.protocol.lookup_uid(channel)
         
+        print modes
+        
         if not channel_uid:
             self.log.log(cll.level.ERROR,'We received a hook FJOIN but the channel could not be looked up by UID :wtc:')
+            return
+        
+        db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,channel_uid.uid)
+            
+        if not db_channel:
+            # Channel is not registered, ignore it
+            return
+                
+        db_channel_modes = yield self.factory.db.runInteraction(self.sqe.get_channel_modes,channel_uid.uid)    
 
-        elif self.factory.is_bursting:
+        am = tools.applied_modes(modes)
+        
+        if self.factory.is_bursting:
             self.access_level_pass(users=channel_uid.users,channel=channel_uid)
         else:
-            
-            db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,channel_uid.uid)
-            
-            if not db_channel:
-                # Channel is not registered, ignore it
-                return
-            
+           
             db_accesslist = yield self.factory.db.runInteraction(self.sqe.get_channel_accesslist,channel_uid.uid)
             
             for user in users:
@@ -435,8 +493,6 @@ class SQLEnforcer(ext.BaseExtension):
         # Attempt to split message into arguments, cast them
         # if required and check them for validity.
         try:
-        
-
 
             channel_name,type,new_level = message.split(' ',3)
    

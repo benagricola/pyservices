@@ -89,6 +89,19 @@ class UIDGenerator:
         cls.uid += 1
         return v
         
+"""
+    Given a list of tuples (give,mode,value) from
+    the spanningtree separate_modes function, this
+    function returns a mode => value dictionary for
+    each mode that is applied to a channel.
+"""   
+def applied_modes(modes):
+    r = {}
+    for give,mode,value in modes:
+        if give:
+            r[mode] = value
+    
+    return r
     
 """
     Utility function to check if a
@@ -97,8 +110,8 @@ class UIDGenerator:
 """
 def contains_any(str, set):
     for c in set:
-        if c in str: return 1;
-    return 0;
+        if c in str: return True;
+    return False;
 
 
 """

@@ -175,7 +175,6 @@ class SQLExtension(ext.BaseExtension):
         
     """
         Gets a users' details from the SQL database.
-        Returns a deferred for use with callbacks.
     """
     def get_user_complete(self,trans,name):
         cfg = self.factory.cfg.sqlextension
@@ -209,7 +208,9 @@ class SQLExtension(ext.BaseExtension):
                 " c.level_halfop as level_halfop, c.level_op as level_op,"
                 " c.level_superop as level_superop,"
                 " c.level_settings as level_settings,"
-                " u.username as founder_name" 
+                " u.username as founder_name,"
+                " c.channel_mode_protection as channel_mode_protection,"
+                " c.user_mode_protection as user_mode_protection"
             " FROM " + cfg.table_prefix + "_channels c" 
             " LEFT JOIN " + cfg.table_prefix + "_users u"
             " ON (c.founder_id = u.id)"
@@ -245,11 +246,11 @@ class SQLExtension(ext.BaseExtension):
             " FROM " + cfg.table_prefix + "_channels c" 
             " INNER JOIN " + cfg.table_prefix + "_channel_modes m"
             " ON (c.id = m.channel_id)"
-            " WHERE c.name = %s LIMIT 1",name
+            " WHERE c.name = %s",name
             
         )
         
-        return trans.fetchone()
+        return trans.fetchall()
         
     def get_channel_complete(self,trans,name):
 

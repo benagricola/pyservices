@@ -923,7 +923,7 @@ class SpanningTree12(LineOnlyReceiver):
         
         target.update_from(_sr)
         
-        self.execute_hook(target=target)
+        self.execute_hook(channel=target,**_sr)
         
         return True
     
@@ -996,6 +996,37 @@ class SpanningTree12(LineOnlyReceiver):
         del channel.users[user.uid]
         
         return True
+        
+    """
+        Called when we receive a KICK
+        command, this removes a user from
+        a Channel().
+        
+        http://wiki.inspircd.org/InspIRCd_Spanning_Tree_1.2/KICK
+        
+    """		
+    def st_receive_kick(self,prefix,args):
+        # Turn the list of fields and arguments into a keyed dictionary
+        try:
+            
+            _sr = sr_assoc(cmd.KICK,args,ignore_reduce=True,ignore_gecos=False)
+        except ValueError:
+            self.log.log(cll.level.ERROR,'KICK command returned wrong number of arguments.')
+            self.st_send_error('KICK command returned wrong number of arguments.')
+            return False
+        
+        # Check to see if the kicked user exists so we can modify it if it does.
+        user = self.lookup_uid(_sr.get('user'))
+        
+        channel = self.lookup_uid(_sr.get('channel'))
+
+        self.execute_hook(user=user,channel=channel)
+        
+        self.log.log(cll.level.VERBOSE,'KICK: Removed user %s from %s ' % (user.uid,channel.uid))
+        del channel.users[user.uid]
+        
+        return True
+        
         
         
     """

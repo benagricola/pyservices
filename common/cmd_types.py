@@ -32,6 +32,7 @@ class CMDTypes(object):
         sr_fields['PRIVMSG'] 	= ['uid','message']
         sr_fields['MODE'] 		= ['target','modes','parameters']
         sr_fields['PART'] 		= ['channel','reason']
+        sr_fields['KICK'] 		= ['channel','user','reason']
         sr_fields['QUIT'] 		= ['reason']
         
         for name, value in sr_fields.items():
