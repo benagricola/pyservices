@@ -167,11 +167,9 @@ class SQLExtension(ext.BaseExtension):
             " FROM " + cfg.table_prefix + "_users r"
             " WHERE username IN (%s)" % format,tuple(names)
         )
-        d = {}
-        for x in trans.fetchall():
-            d[x['username']] = x
-            
-        return d
+        
+        return dict([(x['username'],x) for x in trans.fetchall()])
+       
         
     """
         Gets a users' details from the SQL database.
@@ -229,12 +227,10 @@ class SQLExtension(ext.BaseExtension):
             " " + cfg.table_prefix + "_users u"             
             " WHERE c.name = %s AND c.id = a.channel_id AND u.id = a.user_id ORDER BY a.access_level DESC",name
         )
-        d = {}
+       
         
-        for x in trans.fetchall():
-            d[x['user_id']] = {'username': x['username'] ,'access_level': x['access_level']}
-            
-        return d
+        return dict([(x['user_id'],{'username': x['username'] ,'access_level': x['access_level']}) for x in trans.fetchall()])
+       
             
     def get_channel_modes(self,trans,name): 
         cfg = self.factory.cfg.sqlextension
@@ -250,7 +246,8 @@ class SQLExtension(ext.BaseExtension):
             
         )
         
-        return trans.fetchall()
+        return dict([(x['mode'],x['value']) for x in trans.fetchall()])
+ 
         
     def get_channel_complete(self,trans,name):
 

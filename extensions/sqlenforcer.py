@@ -198,7 +198,7 @@ class SQLEnforcer(ext.BaseExtension):
         depending on the channel type.
     """
     
-    def enforce_modes(self,user,db_user,channel,db_channel,db_accesslist):
+    def enforce_user_modes(self,user,db_user,channel,db_channel,db_accesslist):
         cfg_enforcer = self.factory.cfg.sqlextension.services.enforcer
 
         # Grab ID / founder ID like this instead of using .get()
@@ -305,7 +305,7 @@ class SQLEnforcer(ext.BaseExtension):
     def access_level_pass(self,*args,**kwargs):
         users = kwargs.get('users')
         channel = kwargs.get('channel')
-
+        
         if not channel or not users:
             return 
 
@@ -328,12 +328,12 @@ class SQLEnforcer(ext.BaseExtension):
                 modes = uitem.get('modes')
                 
                 db_user = db_users.get(user.nick,None)
-                self.enforce_modes(user,db_user,channel,db_channel,db_accesslist)
+                self.enforce_user_modes(user,db_user,channel,db_channel,db_accesslist)
                 
         else:   
             user = users
             db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
-            self.enforce_modes(user,db_user,channel,db_channel,db_accesslist)
+            self.enforce_user_modes(user,db_user,channel,db_channel,db_accesslist)
             
 
     """
@@ -354,31 +354,72 @@ class SQLEnforcer(ext.BaseExtension):
             return
                 
         db_channel_modes = yield self.factory.db.runInteraction(self.sqe.get_channel_modes,channel.uid)    
-
+        db_accesslist = yield self.factory.db.runInteraction(self.sqe.get_channel_accesslist,channel.uid)
+        
         # If channel wants to enforce user modes, loop over all applied modes
         # Looking for prefix modes, then run an access pass over each user
         # whos' prefix mode has changed, using passed to record which users
         # we have run an access level pass on (so we dont run multiples for 
         # multiple mode changes.
-        passed = []
+
         ump = db_channel.get('user_mode_protection',0) 
         cmp = db_channel.get('channel_mode_protection',0) 
         
-        for mode, param in tools.applied_modes(modes).items():
+        passed = []
+        
+        am = tools.applied_modes(modes)
+        for mode, value in am.items():
+            give,param = value
             _type = self.protocol.lookup_mode_type(mode,channel)
             
             # Mode change was on a prefix (qaohv) mode and has not been ran yet
             if tools.contains_any('X',_type) and param not in passed and ump:
                 passed.append(param)
-                self.access_level_pass(users=param,channel=channel)
-            elif cmp:
-                # Mode was a channel mode, and channel mode protection is on
-                # Not implemented yet.
-                pass
+                db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,param.nick)
+                
+                self.enforce_user_modes(param,db_user,channel,db_channel,db_accesslist)
+                
+            elif cmp and tools.contains_any('BCD',_type):
+                # Mode was a channel mode, and channel mode protection is on.
+                # We only want to enforce non-type-A ("Mode that adds or removes
+                # a nick or address to a list") modes because bans should be 
+                # handled by channel ops or access lists.
+                self.enforce_channel_mode(channel=channel,db_modes=db_channel_modes,mode=mode,value=value) 
+                
  
         
         
-
+    def enforce_channel_mode(self,channel,db_modes,mode,value):
+        
+        def enforce_mode(mode,value,give):
+            if give:
+                ms = '+'
+            else:
+                ms = '-'
+            self.protocol.st_send_command('SVSMODE',[channel.uid,ms + mode,value],self.factory.enforcer.uid)
+    
+    
+        give,param = value
+            
+        if mode in db_modes:
+            # Mode has an enforcement value listed in DB
+            
+            if not give:
+                # Enforced mode has been removed, re-add it
+                enforce_mode(mode,db_modes.get(mode,''),True)
+            
+            elif param != db_modes.get(mode):
+                # If mode is still enforced but with incorrect value, re-enforce it
+                enforce_mode(mode,db_modes.get(mode,''),True)
+            else:
+                # Mode has just been re-set with correct value, ignore
+                pass
+        
+        else:
+            # Mode is not an enforced mode, so remove it
+            enforce_mode(mode,param,False)
+               
+                     
                 
     """
         This command is hooked when someone joins a channel.
@@ -387,8 +428,6 @@ class SQLEnforcer(ext.BaseExtension):
     def st_receive_fjoin(self,timestamp,channel,users,modes):
 
         channel_uid = self.protocol.lookup_uid(channel)
-        
-        print modes
         
         if not channel_uid:
             self.log.log(cll.level.ERROR,'We received a hook FJOIN but the channel could not be looked up by UID :wtc:')

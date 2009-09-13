@@ -92,14 +92,13 @@ class UIDGenerator:
 """
     Given a list of tuples (give,mode,value) from
     the spanningtree separate_modes function, this
-    function returns a mode => value dictionary for
-    each mode that is applied to a channel.
+    function returns a mode => (give,value) dictionary 
+    for each mode that is applied to a channel.
 """   
 def applied_modes(modes):
     r = {}
     for give,mode,value in modes:
-        if give:
-            r[mode] = value
+            r[mode] = (give,value)
     
     return r
     
