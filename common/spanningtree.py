@@ -923,7 +923,7 @@ class SpanningTree12(LineOnlyReceiver):
         
         target.update_from(_sr)
         
-        self.execute_hook(channel=target,**_sr)
+        self.execute_hook(prefix, channel=target,**_sr)
         
         return True
     
@@ -962,7 +962,7 @@ class SpanningTree12(LineOnlyReceiver):
                 
             target.update_from(_sr)
             
-            self.execute_hook(target=target)
+            self.execute_hook(source_uid=prefix,target=target)
             
             return True
         
@@ -1273,7 +1273,7 @@ class SpanningTree12(LineOnlyReceiver):
         type. Replies with a generic "unknown command" message
     """
     def st_receive_privmsg_unknown(self,source,command,message,pseudoclient_uid):
-            self.st_send_command('PRIVMSG',[source],pseudoclient_uid,'Command %s is not valid.' % command)
+            self.st_send_command('NOTICE',[source],pseudoclient_uid,'Command %s is not valid.' % command)
     
     
     

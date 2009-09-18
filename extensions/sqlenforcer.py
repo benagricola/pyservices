@@ -16,6 +16,7 @@ from datetime import datetime as datetime
 import common.log_levels as cll
 import common.tools as tools
 import common.ext as ext
+import common.uid_types as uid
 from pprint import pprint, pformat
 
 from twisted.enterprise import adbapi 
@@ -145,11 +146,13 @@ class SQLEnforcer(ext.BaseExtension):
             
         db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,channel.uid)
         
+        
         if user:
             db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
         else:
             db_user = None
-            
+
+        
         if db_channel:
             db_topic = db_channel.get('topic')
             
@@ -340,13 +343,23 @@ class SQLEnforcer(ext.BaseExtension):
         This command is hooked when a mode is set.
     """
     @defer.inlineCallbacks
-    def st_receive_fmode(self,channel,timestamp,modes):
-
-
+    def st_receive_fmode(self,source_uid,channel,timestamp,modes):
+        def mode_updated(*args,**kwargs):
+            self.protocol.st_send_command('NOTICE',[source_uid],self.factory.enforcer.uid,'Channel %s mode %s recorded: %s' % (kwargs.get('chan'),kwargs.get('mode'),kwargs.get('value')))
+        
+        def mode_deleted(*args,**kwargs):
+            self.protocol.st_send_command('NOTICE',[source_uid],self.factory.enforcer.uid,'Channel %s mode %s removed: %s'% (kwargs.get('chan'),kwargs.get('mode'),kwargs.get('value')))
+            
+        user = self.protocol.lookup_uid(source_uid)
+        
         if not channel:
             self.log.log(cll.level.ERROR,'We received a hook FMODE but the channel could not be looked up by UID :wtc:')
             return
         
+        if not isinstance(user,uid.User):
+            self.log.log(cll.level.ERROR,'We received a hook FMODE but the user could not be looked up by UID :wtc:')
+            return
+            
         db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,channel.uid)
             
         if not db_channel:
@@ -372,11 +385,11 @@ class SQLEnforcer(ext.BaseExtension):
             give,param = value
             _type = self.protocol.lookup_mode_type(mode,channel)
             
+            
             # Mode change was on a prefix (qaohv) mode and has not been ran yet
             if tools.contains_any('X',_type) and param not in passed and ump:
                 passed.append(param)
                 db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,param.nick)
-                
                 self.enforce_user_modes(param,db_user,channel,db_channel,db_accesslist)
                 
             elif cmp and tools.contains_any('BCD',_type):
@@ -384,14 +397,50 @@ class SQLEnforcer(ext.BaseExtension):
                 # We only want to enforce non-type-A ("Mode that adds or removes
                 # a nick or address to a list") modes because bans should be 
                 # handled by channel ops or access lists.
-                self.enforce_channel_mode(channel=channel,db_modes=db_channel_modes,mode=mode,value=value) 
                 
- 
+                if not isinstance(user,uid.User):
+                    self.enforce_channel_mode(channel=channel,db_modes=db_channel_modes,mode=mode,value=value) 
+                else:
+                    db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
+                    
+                    # First check if the user who set the mode was founder, if so, save it
+                    # Else enforce mode change
+                    if db_user['id'] == db_channel['founder_id']:
+                        # User is founder, modify / delete mode
+                        
+                        value = param
+                        if not value:
+                            value = ''
+                            
+                        cfg = self.factory.cfg.sqlextension
+                        
+                        if give: 
+                            # User is adding or editing an existing mode, insert or update
+                            self.factory.db.runOperation \
+                                (
+                                    "INSERT INTO  " + cfg.table_prefix + "_channel_modes (channel_id,mode,value) VALUES (%s,%s,%s) ON DUPLICATE KEY UPDATE value = VALUES(value)", 
+                                    [db_channel['id'],mode,value]
+                                ).addCallbacks(mode_updated,self.query_error_callback,None,{'chan': channel.uid, 'mode': mode, 'value': param})
+            
+                        else:
+                            # User is unsetting a mode, delete it
+                            self.factory.db.runOperation \
+                                (
+                                    "DELETE FROM " + cfg.table_prefix + "_channel_modes WHERE channel_id = %s AND mode = %s LIMIT 1", 
+                                    [db_channel['id'],mode]
+                                ).addCallbacks(mode_deleted,self.query_error_callback,None,{'chan': channel.uid, 'mode': mode, 'value': param})
+                    else:
+                        self.enforce_channel_mode(channel=channel,db_modes=db_channel_modes,mode=mode,value=value) 
+                    
+     
         
         
     def enforce_channel_mode(self,channel,db_modes,mode,value):
         
         def enforce_mode(mode,value,give):
+            if not value: 
+                value = ''
+                
             if give:
                 ms = '+'
             else:
@@ -436,12 +485,35 @@ class SQLEnforcer(ext.BaseExtension):
         db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,channel_uid.uid)
             
         if not db_channel:
-            # Channel is not registered, ignore it
+            # Channel is not registered
+            # If this is a single user join, check to see if they have 
+            # permissions to make the channel and if not, punish
+            if len(channel_uid.users) == 1:
+                for user in users:
+                    user_uid = self.protocol.lookup_uid(user)
+                    db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user_uid.nick)
+                    self.enforce_create_channel_access(user_uid,db_user,channel_uid)
             return
                 
         db_channel_modes = yield self.factory.db.runInteraction(self.sqe.get_channel_modes,channel_uid.uid)    
 
+  
+        
+        # Every join, attempt to apply any removed modes from a channel.
+        # This means that when a channel is created by a join, its' 
+        # enforced modes are set during that join.
         am = tools.applied_modes(modes)
+        for mode, value in db_channel_modes.items():
+            if mode in am:
+                continue
+                
+            _type = self.protocol.lookup_mode_type(mode,channel_uid)
+            
+            if tools.contains_any('BCD',_type):
+                self.protocol.st_send_command('SVSMODE',[channel_uid.uid,'+' + mode,value],self.factory.enforcer.uid)
+                
+                
+            
         
         if self.factory.is_bursting:
             self.access_level_pass(users=channel_uid.users,channel=channel_uid)
@@ -454,10 +526,28 @@ class SQLEnforcer(ext.BaseExtension):
                 if not user_uid:
                     break
                 db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user_uid.nick)
-                self.enforce_modes(user_uid,db_user,channel_uid,db_channel,db_accesslist)
+                self.enforce_user_modes(user_uid,db_user,channel_uid,db_channel,db_accesslist)
         
 
+
+    def enforce_create_channel_access(self,user,db_user,channel):
+        cfg_enforcer = self.factory.cfg.sqlextension.services.enforcer
         
+        effective_level = db_user['level']
+        
+        if effective_level < cfg_enforcer.level_chancreate_min:
+            
+                
+                cfg_bad_behaviour = self.factory.cfg.sqlextension.services.enforcer.bad_behaviour
+                if not self.bad_behaviour(user,cfg_bad_behaviour.value_chancreatedenied_enforce,cfg_bad_behaviour.timeout_chancreatedenied_enforce):
+                        
+                    self.protocol.st_send_command('SVSPART',[user.uid,channel.uid],self.factory.enforcer.uid)
+                    self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,'Channel %s creation denied by user level (%s < %s).' % (channel.uid,effective_level,cfg_enforcer.level_chancreate_min))
+                    
+                    self.log.log(cll.level.DEBUG,'Parted %s on %s (Channel Create denied)' % (user.nick,channel.uid))
+                    
+        return
+            
     """
         This is called when we receive a new UID from the peer server,
         either during the connect sequence or when a new client is 
@@ -475,6 +565,9 @@ class SQLEnforcer(ext.BaseExtension):
 
         db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
         
+        if not db_user:
+            self.log.log(cll.level.ERROR,'User was not found in database (THIS SHOULD NEVER HAPPEN)')
+            return
         self.user_trigger_welcome(user,db_user)
         
     
@@ -482,14 +575,42 @@ class SQLEnforcer(ext.BaseExtension):
         Gives the user a welcome message and executes any autojoins that they may
         have.
     """
+    @defer.inlineCallbacks
     def user_trigger_welcome(self,user,db_user):
         ajchans = db_user.get('autojoin')
         if not self.factory.is_bursting:
             if ajchans:
                 for chan in ajchans.split(','):
-                    self.protocol.st_send_command('SVSJOIN',[user.uid,chan],self.factory.cfg.server.sid)
+                    # Get permissions for channel, if user has access force them to join
+                    db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,chan)
+                    
+                    # If autojoin contains an invalid channel, skip it
+                    if not db_channel:
+                        continue
+                        
+                    # If channel runs an access list, check for permissions there
+                    if db_channel['type'] in ('ACCESSLIST'):
+                        db_accesslist = yield self.factory.db.runInteraction(self.sqe.get_channel_accesslist,chan)
+                        
 
-    
+                        if db_user['id'] in db_accesslist: 
+                            self.protocol.st_send_command('INVITE',[user.uid,chan],self.factory.enforcer.uid)
+                            self.protocol.st_send_command('SVSJOIN',[user.uid,chan],self.factory.cfg.server.sid)
+                        else:
+                            self.log.log(cll.level.INFO,'User %s has no access to %s' % (user.nick,chan))
+                            
+                    # Otherwise, check for permissions using global level
+                    elif db_channel['type'] in ('USERLEVEL'):
+                        if db_user.get('level',0) >= db_channel['min_level']: 
+                            self.protocol.st_send_command('INVITE',[user.uid,chan],self.factory.enforcer.uid)
+                            self.protocol.st_send_command('SVSJOIN',[user.uid,chan],self.factory.cfg.server.sid)
+                        else:
+                            self.log.log(cll.level.INFO,'User %s has no access to %s' % (user.nick,chan))
+                    elif db_channel['type'] in ('PUBLIC_ACCESSLIST','PUBLIC_USERLEVEL'):
+                        self.protocol.st_send_command('SVSJOIN',[user.uid,chan],self.factory.cfg.server.sid)
+                    
+                    else:
+                        self.log.log(cll.level.INFO,'User %s has no access to %s' % (user.nick,chan))
             self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,'Welcome %s! Your current global access level is %s.' % (user.nick,db_user.get('level',0)))
             
     
@@ -706,14 +827,16 @@ class SQLEnforcer(ext.BaseExtension):
         def usage():
             self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] Syntax: CHANTYPE #channel [PUBLIC_]USERLEVEL|ACCESSLIST')
         
-        def no_change(chan,type):
-            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s already has type %s' % (chan,type))
+        def no_change(chan,typename):
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s already has type %s' % (chan,typename))
         
         def access_denied():
             self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] <---- READ THIS (Access Denied)')
             
         def type_updated(*args,**kwargs):
-            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s type changed to: %s' % (kwargs.get('chan'),kwargs.get('type')))
+            chan = kwargs.get('chan')
+            self.access_level_pass(users=chan.users,channel=chan)
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s type changed to: %s' % (chan.uid,kwargs.get('type')))
         
         if pseudoclient_uid != self.factory.enforcer.uid:
             return
@@ -756,10 +879,9 @@ class SQLEnforcer(ext.BaseExtension):
             (
                 "UPDATE " + cfg.table_prefix + "_channels SET type = %s WHERE id = %s LIMIT 1", 
                 [new_type,db_channel['id']]
-            ).addCallbacks(type_updated,self.query_error_callback,None,{'chan': channel.uid,'type': new_type})
+            ).addCallbacks(type_updated,self.query_error_callback,None,{'chan': channel,'type': new_type})
         
-        self.access_level_pass(users=channel.users,channel=channel)
-        
+
         return
         
         
@@ -787,7 +909,7 @@ class SQLEnforcer(ext.BaseExtension):
             self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] Syntax: CHANTOPIC #channel ENFORCE <1|0> | TOPIC <text>')
         
         def no_change(chan,function,value):
-            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s value CHANTOPIC %s already has value %s' % (chan,function,type))
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s value CHANTOPIC %s already has value %s' % (chan,function,value))
         
         def no_channel():
             self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s does not exist' % (message))
@@ -802,10 +924,14 @@ class SQLEnforcer(ext.BaseExtension):
         if pseudoclient_uid != self.factory.enforcer.uid:
             return
         
+         
         try:
-        
-            channel_name,function,value = message.split(' ',3)
+           
+            channel_name,function,value = message.split(' ',2)
             function = function.upper()
+            
+            
+     
             
             if function not in ('TOPIC','ENFORCE'):
                 raise ValueError('Invalid Type')
@@ -851,12 +977,16 @@ class SQLEnforcer(ext.BaseExtension):
         if db_channel['founder_id'] != db_user['id']:
             access_denied()
             return   
+          
+        if function in ('TOPIC'):
+            self.protocol.st_send_command('TOPIC',[chan.uid],self.factory.enforcer.uid,value)
             
-        if db_channel['topic_protection'] == value:
+        elif function in ('ENFORCE') and db_channel['topic_protection'] == value:
             no_change(chan.uid,function,value)
             return
 
-
+        
+                   
         cfg = self.factory.cfg.sqlextension
         self.factory.db.runOperation \
             (
@@ -888,7 +1018,7 @@ class SQLEnforcer(ext.BaseExtension):
         """
         
         def usage():
-            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[TRUSTED ONLY] Syntax: REGISTER #channel')
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[TRUSTED ONLY] Syntax: CHANACC #channel ADD | DEL | LIST <nick | search_string> [<1-100>]')
         
         def no_channel(channel):
             self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s does not exist' % (channel))
