@@ -588,8 +588,12 @@ class SQLEnforcer(ext.BaseExtension):
                     if not db_channel:
                         continue
                         
+                    if db_user['id'] == db_channel['founder_id']:
+                        self.protocol.st_send_command('INVITE',[user.uid,chan],self.factory.enforcer.uid)
+                        self.protocol.st_send_command('SVSJOIN',[user.uid,chan],self.factory.cfg.server.sid)
+                    
                     # If channel runs an access list, check for permissions there
-                    if db_channel['type'] in ('ACCESSLIST'):
+                    elif db_channel['type'] in ('ACCESSLIST'):
                         db_accesslist = yield self.factory.db.runInteraction(self.sqe.get_channel_accesslist,chan)
                         
 
@@ -597,6 +601,7 @@ class SQLEnforcer(ext.BaseExtension):
                             self.protocol.st_send_command('INVITE',[user.uid,chan],self.factory.enforcer.uid)
                             self.protocol.st_send_command('SVSJOIN',[user.uid,chan],self.factory.cfg.server.sid)
                         else:
+                            self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,'Did not AJOIN you to %s because you do not have sufficient access privileges.' % (user.nick,chan))
                             self.log.log(cll.level.INFO,'User %s has no access to %s' % (user.nick,chan))
                             
                     # Otherwise, check for permissions using global level
@@ -605,17 +610,140 @@ class SQLEnforcer(ext.BaseExtension):
                             self.protocol.st_send_command('INVITE',[user.uid,chan],self.factory.enforcer.uid)
                             self.protocol.st_send_command('SVSJOIN',[user.uid,chan],self.factory.cfg.server.sid)
                         else:
+                            self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,'Did not AJOIN you to %s because you do not have sufficient access privileges.' % (user.nick,chan))
                             self.log.log(cll.level.INFO,'User %s has no access to %s' % (user.nick,chan))
+                            
                     elif db_channel['type'] in ('PUBLIC_ACCESSLIST','PUBLIC_USERLEVEL'):
+                        self.protocol.st_send_command('INVITE',[user.uid,chan],self.factory.enforcer.uid)
                         self.protocol.st_send_command('SVSJOIN',[user.uid,chan],self.factory.cfg.server.sid)
                     
                     else:
+                        self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,'Did not AJOIN you to %s because you do not have sufficient access privileges.' % (user.nick,chan))
                         self.log.log(cll.level.INFO,'User %s has no access to %s' % (user.nick,chan))
+                        
             self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,'Welcome %s! Your current global access level is %s.' % (user.nick,db_user.get('level',0)))
             
     
           
-     
+    """
+        Handles Enforcer AJOIN command, using internal functions for error output
+        and initial docstring for HELP output.
+    """
+    @defer.inlineCallbacks
+    def ps_privmsg_ajoin(self,command,message,pseudoclient_uid,source_uid):
+        """
+            Usage:          AJOIN ADD|DEL|LIST [#channel]
+            Access:         ALL USERS
+            Description:    Adds a channel to your automatic join list.
+                            On connect, you will be auto-joined to all
+                            channels on the list that you have access 
+                            to.
+        """
+        
+        def usage():
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[ALL USERS] Usage: AJOIN ADD|DEL|LIST [#channel]')
+        
+        def duplicate_ajoin(channel):
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s is already in your AJOIN list.' % (channel))
+        
+        def no_ajoin(channel):
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s is not in your AJOIN list.' % (channel))
+         
+        def ajoin_added(*args,**kwargs):
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'%s added to your AJOIN list.' % (kwargs.get('chan')))
+        
+        def ajoin_deleted(*args,**kwargs):
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'%s deleted from your AJOIN list.' % (kwargs.get('chan')))
+            
+        if pseudoclient_uid != self.factory.enforcer.uid:
+            return
+                
+        channel_name = ''
+        
+        print message.split(' ',1)
+        try:
+        
+            v = message.split(' ')
+           
+            if len(v) == 1:
+                function, = v
+            else:
+                function, channel_name = v
+                
+            function = function.upper()
+            
+            
+            if function not in ('ADD','DEL','LIST'):
+                raise ValueError('Invalid Function')
+                
+            
+        except ValueError:
+                usage()
+                return   
+
+        # Look up the channel and the user UID in question
+        channel = self.protocol.lookup_uid(channel_name)
+        user = self.protocol.lookup_uid(source_uid)
+            
+        # If either of them don't exist, show usage
+        if (not channel and function in ('ADD','DEL')) or not user:
+            usage()
+            return    
+
+        if function in ('ADD','DEL'):
+            db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,channel.uid)
+        else:
+            db_channel = None
+            
+        db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
+        
+
+        
+        if not db_user or (not db_channel and function in ('ADD','DEL')):
+            usage()
+            return
+
+        ajchans = db_user.get('autojoin')
+        
+        if not ajchans:
+            ajchans = []
+        else:
+            ajchans = ajchans.split(',')
+        
+        
+            
+        cfg = self.factory.cfg.sqlextension
+        
+        if function in ('ADD'):
+            if channel_name in ajchans:
+                duplicate_ajoin(channel_name)
+                return
+            
+            self.factory.db.runOperation \
+                (
+                    "INSERT INTO " + cfg.table_prefix + "_user_autojoin (user_id,channel_id) VALUES (%s,%s)", 
+                    [db_user['id'],db_channel['id']]
+                ).addCallbacks(ajoin_added,self.query_error_callback,None,{'chan': channel.uid})
+             
+        elif function in ('DEL'):
+
+            if channel_name not in ajchans:
+                no_ajoin(channel_name)
+                return
+            
+            self.factory.db.runOperation \
+                (
+                    "DELETE FROM " + cfg.table_prefix + "_user_autojoin WHERE user_id = %s AND channel_id = %s LIMIT 1", 
+                    [db_user['id'],db_channel['id']]
+                ).addCallbacks(ajoin_deleted,self.query_error_callback,None,{'chan': channel.uid})
+             
+        elif function in ('LIST'):
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channels on your AJOIN List:')
+            for chan in ajchans:
+                self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'  %s' % (chan))    
+                
+
+       
     """
         Handles Enforcer CHANLEVEL command, using internal functions for error output
         and initial docstring for HELP output.
@@ -796,7 +924,7 @@ class SQLEnforcer(ext.BaseExtension):
             self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'The following commands are available by messaging (/msg) %s:' % self.factory.enforcer.nick)
             for method in mlist:
                 cmd_name = method.split('_').pop().upper()
-                self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,' ' + cmd_name)
+                self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'  ' + cmd_name)
         
         return True
         
