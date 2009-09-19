@@ -535,7 +535,7 @@ class SQLEnforcer(ext.BaseExtension):
         
         effective_level = db_user['level']
         
-        if effective_level < cfg_enforcer.level_chancreate_min:
+        if effective_level < cfg_enforcer.level_chancreate_min and cfg_enforcer.enforce_chancreate_limit:
             
                 
                 cfg_bad_behaviour = self.factory.cfg.sqlextension.services.enforcer.bad_behaviour
