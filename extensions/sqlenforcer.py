@@ -571,6 +571,11 @@ class SQLEnforcer(ext.BaseExtension):
         self.user_trigger_welcome(user,db_user)
         
     
+    def invite_svsjoin(self,user,channel):
+        self.protocol.st_send_command('INVITE',[user.uid,channel],self.factory.enforcer.uid)
+        self.protocol.st_send_command('SVSJOIN',[user.uid,channel],self.factory.cfg.server.sid)
+        
+        
     """
         Gives the user a welcome message and executes any autojoins that they may
         have.
@@ -589,17 +594,16 @@ class SQLEnforcer(ext.BaseExtension):
                         continue
                         
                     if db_user['id'] == db_channel['founder_id']:
-                        self.protocol.st_send_command('INVITE',[user.uid,chan],self.factory.enforcer.uid)
-                        self.protocol.st_send_command('SVSJOIN',[user.uid,chan],self.factory.cfg.server.sid)
+                        self.invite_svsjoin(user,chan)
+                    
+                        
                     
                     # If channel runs an access list, check for permissions there
                     elif db_channel['type'] in ('ACCESSLIST'):
                         db_accesslist = yield self.factory.db.runInteraction(self.sqe.get_channel_accesslist,chan)
                         
-
                         if db_user['id'] in db_accesslist: 
-                            self.protocol.st_send_command('INVITE',[user.uid,chan],self.factory.enforcer.uid)
-                            self.protocol.st_send_command('SVSJOIN',[user.uid,chan],self.factory.cfg.server.sid)
+                            self.invite_svsjoin(user,chan)
                         else:
                             self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,'Did not AJOIN you to %s because you do not have sufficient access privileges.' % (user.nick,chan))
                             self.log.log(cll.level.INFO,'User %s has no access to %s' % (user.nick,chan))
@@ -607,15 +611,13 @@ class SQLEnforcer(ext.BaseExtension):
                     # Otherwise, check for permissions using global level
                     elif db_channel['type'] in ('USERLEVEL'):
                         if db_user.get('level',0) >= db_channel['min_level']: 
-                            self.protocol.st_send_command('INVITE',[user.uid,chan],self.factory.enforcer.uid)
-                            self.protocol.st_send_command('SVSJOIN',[user.uid,chan],self.factory.cfg.server.sid)
+                            self.invite_svsjoin(user,chan)
                         else:
                             self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,'Did not AJOIN you to %s because you do not have sufficient access privileges.' % (user.nick,chan))
                             self.log.log(cll.level.INFO,'User %s has no access to %s' % (user.nick,chan))
                             
                     elif db_channel['type'] in ('PUBLIC_ACCESSLIST','PUBLIC_USERLEVEL'):
-                        self.protocol.st_send_command('INVITE',[user.uid,chan],self.factory.enforcer.uid)
-                        self.protocol.st_send_command('SVSJOIN',[user.uid,chan],self.factory.cfg.server.sid)
+                        self.invite_svsjoin(user,chan)
                     
                     else:
                         self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,'Did not AJOIN you to %s because you do not have sufficient access privileges.' % (user.nick,chan))
@@ -624,7 +626,93 @@ class SQLEnforcer(ext.BaseExtension):
             self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,'Welcome %s! Your current global access level is %s.' % (user.nick,db_user.get('level',0)))
             
     
-          
+         
+    """
+        Handles Enforcer INVITE command, using internal functions for error output
+        and initial docstring for HELP output.
+    """
+    @defer.inlineCallbacks
+    def ps_privmsg_invite(self,command,message,pseudoclient_uid,source_uid):
+        """
+            Usage:          INVITE #channel
+            Access:         ALL USERS
+            Description:    Requests an invite from services to a specific
+                            channel. If the channel is +i and the user has
+                            the relevant access levels, they will be given
+                            an invite to the channel and then force-joined.
+        """
+        def usage():
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[ALL USERS] Usage: INVITE #channel')
+       
+       
+        def not_registered(channel):
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s is not registered - invites cannot be given.' % (channel))
+              
+        def no_channel(channel):
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s does not exist (it may be empty, in this case just join as usual).' % (channel))
+        
+        def access_denied():
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Access Denied: You must have rights in the channel you\'re requesting an invite for.')
+            
+            
+        if pseudoclient_uid != self.factory.enforcer.uid:
+            return
+                
+
+        # First make sure the channel name is valid
+        if not message.startswith('#'):
+            usage()
+            return 
+   
+        chan = self.protocol.lookup_uid(message)
+        user = self.protocol.lookup_uid(source_uid)
+        # Make sure the channel exists
+        if not chan:
+            no_channel()
+            return
+        
+        if not user:
+            usage()
+            return
+            
+        
+       
+        db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,chan.uid)
+        db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
+        if not db_channel:
+            not_registered()
+            return
+            
+       
+        
+        if db_user['id'] == db_channel['founder_id']:
+            self.invite_svsjoin(user,chan.uid)
+            
+        elif db_channel['type'] in ('ACCESSLIST'):
+            db_channel_accesslist = yield self.factory.db.runInteraction(self.sqe.get_channel_accesslist,chan.uid)
+            
+            if db_user['id'] in db_accesslist: 
+                self.invite_svsjoin(user,chan.uid)
+            else:
+                access_denied()
+                self.log.log(cll.level.INFO,'User %s has no access to %s' % (user.nick,chan))
+                
+        elif db_channel['type'] in ('USERLEVEL'):
+        
+            if db_user.get('level',0) >= db_channel['min_level']: 
+                self.invite_svsjoin(user,chan.uid)
+            else:
+                access_denied()
+                self.log.log(cll.level.INFO,'User %s has no access to %s' % (user.nick,chan))
+                
+        elif db_channel['type'] in ('PUBLIC_ACCESSLIST','PUBLIC_USERLEVEL'):
+            self.invite_svsjoin(user,chan.uid)
+            
+        else:
+            access_denied()
+            self.log.log(cll.level.INFO,'User %s has no access to %s' % (user.nick,chan))
+            
+            
     """
         Handles Enforcer AJOIN command, using internal functions for error output
         and initial docstring for HELP output.
@@ -660,7 +748,6 @@ class SQLEnforcer(ext.BaseExtension):
                 
         channel_name = ''
         
-        print message.split(' ',1)
         try:
         
             v = message.split(' ')
@@ -1225,7 +1312,7 @@ class SQLEnforcer(ext.BaseExtension):
             usage()
             return
        
-
+        
         db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,chan.uid)
         db_channel_accesslist = yield self.factory.db.runInteraction(self.sqe.get_channel_accesslist,chan.uid)
         db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
@@ -1342,7 +1429,7 @@ class SQLEnforcer(ext.BaseExtension):
         if pseudoclient_uid != self.factory.enforcer.uid:
             return
         
-        channel = message.lower()
+        channel = message
         # First make sure the channel name is valid
         if not channel.startswith('#'):
             usage()

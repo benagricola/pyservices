@@ -69,6 +69,9 @@ sqlextension:
             
             ban_accessdenied_expiry:    600 # Seconds
             
+            enforce_chancreate_limit: True
+            level_chancreate_min: 100
+            
             bad_behaviour:
             {
                 enabled:    True,
@@ -84,6 +87,9 @@ sqlextension:
                 
                 value_accessdenied_enforce:     35,
                 timeout_accessdenied_enforce:   1200,
+                
+                value_chancreatedenied_enforce:     20,
+                timeout_chancreatedenied_enforce:   600,
             }
         }
         
