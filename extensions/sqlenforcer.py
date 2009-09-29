@@ -1111,80 +1111,80 @@ class SQLEnforcer(ext.BaseExtension):
                             on and off. If enforce is on, only modes which the 
                             user has access to will be allowed to be given.
         """
-    def usage():
-        self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] Syntax: USERMODES #channel ENFORCE <1|0>')
-    
-    def no_change(chan,function,value):
-        self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s value USERMODES %s already has value %s' % (chan,function,value))
-    
-    def no_channel():
-        self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s does not exist' % (message))
-         
-    def access_denied():
-        self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] <---- READ THIS (Access Denied)')
+        def usage():
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] Syntax: USERMODES #channel ENFORCE <1|0>')
+        
+        def no_change(chan,function,value):
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s value USERMODES %s already has value %s' % (chan,function,value))
+        
+        def no_channel():
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s does not exist' % (message))
+             
+        def access_denied():
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] <---- READ THIS (Access Denied)')
+          
+        if pseudoclient_uid != self.factory.enforcer.uid:
+            return
+            
+             
+        try:
+           
+            channel_name,function,value = message.split(' ',2)
+            function = function.upper()
+            
+            if function not in ('ENFORCE'):
+                raise ValueError('Invalid Type')
+            else:
+
+                value = int(value)
+                if value > 1 or value < 0:
+                    usage()
+                    return
+                    
       
-    if pseudoclient_uid != self.factory.enforcer.uid:
+        except ValueError:
+            usage()
+            return         
+          
+        
+        channel = channel_name.lower()
+        # First make sure the channel name is valid
+        if not channel.startswith('#'):
+            usage()
+            return 
+
+        chan = self.protocol.lookup_uid(channel)
+        user = self.protocol.lookup_uid(source_uid)
+        # Make sure the channel exists
+        if not chan:
+            no_channel()
             return
         
-         
-    try:
-       
-        channel_name,function,value = message.split(' ',2)
-        function = function.upper()
+        if not user:
+            usage()
+            return 
+            
+        db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,chan.uid)
+        db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
         
-        if function not in ('ENFORCE'):
-            raise ValueError('Invalid Type')
-        else:
+        # If user is not the channel founder, show message
+        if db_channel['founder_id'] != db_user['id']:
+            access_denied()
+            return   
+            
+        if db_channel['user_mode_protection'] == value:
+                no_change(chan.uid,function,value)
+                return        
+        
+        cfg = self.factory.cfg.sqlextension
+        self.factory.db.runOperation \
+            (
+                "UPDATE " + cfg.table_prefix + "_channels SET user_mode_protection = %s WHERE id = %s LIMIT 1", 
+                [value,db_channel['id']]
+            ).addCallbacks(topic_updated,self.query_error_callback,None,{'chan': chan.uid,'function': function,'value': value})
 
-            value = int(value)
-            if value > 1 or value < 0:
-                usage()
-                return
-                
-  
-    except ValueError:
-        usage()
-        return         
-      
-    
-    channel = channel_name.lower()
-    # First make sure the channel name is valid
-    if not channel.startswith('#'):
-        usage()
-        return 
-
-    chan = self.protocol.lookup_uid(channel)
-    user = self.protocol.lookup_uid(source_uid)
-    # Make sure the channel exists
-    if not chan:
-        no_channel()
+        
         return
-    
-    if not user:
-        usage()
-        return 
-        
-    db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,chan.uid)
-    db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
-    
-    # If user is not the channel founder, show message
-    if db_channel['founder_id'] != db_user['id']:
-        access_denied()
-        return   
-        
-    if db_channel['user_mode_protection'] == value:
-            no_change(chan.uid,function,value)
-            return        
-    
-    cfg = self.factory.cfg.sqlextension
-    self.factory.db.runOperation \
-        (
-            "UPDATE " + cfg.table_prefix + "_channels SET user_mode_protection = %s WHERE id = %s LIMIT 1", 
-            [value,db_channel['id']]
-        ).addCallbacks(topic_updated,self.query_error_callback,None,{'chan': chan.uid,'function': function,'value': value})
-
-    
-    return
 
 
     
@@ -1200,80 +1200,80 @@ class SQLEnforcer(ext.BaseExtension):
                             on and off. If enforce is on, only the founder is
                             able to modify channel modes.
         """
-    def usage():
-        self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] Syntax: CHANMODES #channel ENFORCE <1|0>')
-    
-    def no_change(chan,function,value):
-        self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s value CHANMODES %s already has value %s' % (chan,function,value))
-    
-    def no_channel():
-        self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s does not exist' % (message))
-         
-    def access_denied():
-        self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] <---- READ THIS (Access Denied)')
+        def usage():
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] Syntax: CHANMODES #channel ENFORCE <1|0>')
+        
+        def no_change(chan,function,value):
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s value CHANMODES %s already has value %s' % (chan,function,value))
+        
+        def no_channel():
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s does not exist' % (message))
+             
+        def access_denied():
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] <---- READ THIS (Access Denied)')
+          
+        if pseudoclient_uid != self.factory.enforcer.uid:
+                return
+            
+             
+        try:
+           
+            channel_name,function,value = message.split(' ',2)
+            function = function.upper()
+            
+            if function not in ('ENFORCE'):
+                raise ValueError('Invalid Type')
+            else:
+
+                value = int(value)
+                if value > 1 or value < 0:
+                    usage()
+                    return
+                    
       
-    if pseudoclient_uid != self.factory.enforcer.uid:
+        except ValueError:
+            usage()
+            return         
+          
+        
+        channel = channel_name.lower()
+        # First make sure the channel name is valid
+        if not channel.startswith('#'):
+            usage()
+            return 
+
+        chan = self.protocol.lookup_uid(channel)
+        user = self.protocol.lookup_uid(source_uid)
+        # Make sure the channel exists
+        if not chan:
+            no_channel()
             return
         
-         
-    try:
-       
-        channel_name,function,value = message.split(' ',2)
-        function = function.upper()
+        if not user:
+            usage()
+            return 
+            
+        db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,chan.uid)
+        db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
         
-        if function not in ('ENFORCE'):
-            raise ValueError('Invalid Type')
-        else:
+        # If user is not the channel founder, show message
+        if db_channel['founder_id'] != db_user['id']:
+            access_denied()
+            return   
+            
+        if db_channel['channel_mode_protection'] == value:
+                no_change(chan.uid,function,value)
+                return        
+        
+        cfg = self.factory.cfg.sqlextension
+        self.factory.db.runOperation \
+            (
+                "UPDATE " + cfg.table_prefix + "_channels SET channel_mode_protection = %s WHERE id = %s LIMIT 1", 
+                [value,db_channel['id']]
+            ).addCallbacks(topic_updated,self.query_error_callback,None,{'chan': chan.uid,'function': function,'value': value})
 
-            value = int(value)
-            if value > 1 or value < 0:
-                usage()
-                return
-                
-  
-    except ValueError:
-        usage()
-        return         
-      
-    
-    channel = channel_name.lower()
-    # First make sure the channel name is valid
-    if not channel.startswith('#'):
-        usage()
-        return 
-
-    chan = self.protocol.lookup_uid(channel)
-    user = self.protocol.lookup_uid(source_uid)
-    # Make sure the channel exists
-    if not chan:
-        no_channel()
+        
         return
-    
-    if not user:
-        usage()
-        return 
-        
-    db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,chan.uid)
-    db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
-    
-    # If user is not the channel founder, show message
-    if db_channel['founder_id'] != db_user['id']:
-        access_denied()
-        return   
-        
-    if db_channel['channel_mode_protection'] == value:
-            no_change(chan.uid,function,value)
-            return        
-    
-    cfg = self.factory.cfg.sqlextension
-    self.factory.db.runOperation \
-        (
-            "UPDATE " + cfg.table_prefix + "_channels SET channel_mode_protection = %s WHERE id = %s LIMIT 1", 
-            [value,db_channel['id']]
-        ).addCallbacks(topic_updated,self.query_error_callback,None,{'chan': chan.uid,'function': function,'value': value})
-
-    
-    return
             
             
     @defer.inlineCallbacks    
