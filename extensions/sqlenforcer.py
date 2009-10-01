@@ -547,7 +547,19 @@ class SQLEnforcer(ext.BaseExtension):
                     self.log.log(cll.level.DEBUG,'Parted %s on %s (Channel Create denied)' % (user.nick,channel.uid))
                     
         return
-            
+     
+    """
+        Called when we receive a NICK command. Since the entire
+        SQL system relies on nicknames being disabled, this will
+        probably only be called by an oper forcing nick changes.
+        We want to auto-kill anyone whos' nick gets changed so
+        problems are not caused by non-existent nicknames in the DB.
+    """
+    def st_receive_nick(self,*args,**kwargs):
+        print args
+        print kwargs
+        
+        
     """
         This is called when we receive a new UID from the peer server,
         either during the connect sequence or when a new client is 

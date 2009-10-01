@@ -89,15 +89,19 @@ class SQLGlobal(ext.BaseExtension):
         
         
         
+        
     # !!! FIX: This should be a part of operserve but is also related to global
-    def ps_privmsg_global(self,source_uid,command,message,pseudoclient_uid):
-        if pseudoclient_uid == self.oper_tool.uid: 
+    def ps_privmsg_announce(self,source_uid,command,message,pseudoclient_uid):
+        if pseudoclient_uid == self.factory.global_announce.uid: 
             source = self.protocol.lookup_uid(source_uid)
 
             if not source:
                 self.log.log(cll.level.ERROR,'Could not find existing entry for source UID %s' % source_uid)
                 return False
             
-            if 'o' in source.modes and source.oper_type is not None:
+            print source.modes
+            print source.oper_type
+            if source.oper_type is not None:
                 self.send_global_notice('[%s]: %s' % (source.nick,message))
             return True
+
