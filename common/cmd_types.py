@@ -20,28 +20,24 @@ import itertools
 class CMDTypes(object):
     def __init__(self):
         sr_fields = {}
-        sr_fields['SERVER'] 	= ['name','password','hops','uid','description']
-        sr_fields['OPERTYPE'] 	= ['type']
-        sr_fields['UID'] 		= ['uid','timestamp','nick','hostname','displayed_hostname','ident','ip','signed_on','modes','parameters','gecos']
-        sr_fields['METADATA'] 	= ['uid','name','value']
-        sr_fields['FJOIN'] 		= ['channel','timestamp','modes','parameters','users']
-        sr_fields['FHOST'] 		= ['hostname']
-        sr_fields['FMODE'] 		= ['target','timestamp','modes','parameters']
-        sr_fields['FTOPIC'] 	= ['channel','topic_time','topic_set_by','topic']
-        sr_fields['TOPIC'] 		= ['channel','topic']
-        sr_fields['PRIVMSG'] 	= ['uid','message']
-        sr_fields['MODE'] 		= ['target','modes','parameters']
-        sr_fields['PART'] 		= ['channel','reason']
-        sr_fields['KICK'] 		= ['channel','user','reason']
-        sr_fields['QUIT'] 		= ['reason']
+        sr_fields['SERVER']     = ['name','password','hops','uid','description']
+        sr_fields['OPERTYPE']   = ['type']
+        sr_fields['UID']        = ['uid','timestamp','nick','hostname','displayed_hostname','ident','ip','signed_on','modes','parameters','gecos']
+        sr_fields['METADATA']   = ['uid','name','value']
+        sr_fields['FJOIN']      = ['channel','timestamp','modes','parameters','users']
+        sr_fields['FHOST']      = ['hostname']
+        sr_fields['FMODE']      = ['target','timestamp','modes','parameters']
+        sr_fields['FTOPIC']     = ['channel','topic_time','topic_set_by','topic']
+        sr_fields['TOPIC']      = ['channel','topic']
+        sr_fields['PRIVMSG']    = ['uid','message']
+        sr_fields['MODE']       = ['target','modes','parameters']
+        sr_fields['PART']       = ['channel','reason']
+        sr_fields['KICK']       = ['channel','user','reason']
+        sr_fields['QUIT']       = ['reason']
         
-        for name, value in sr_fields.items():
-            setattr(self, name, value)
-
-# This is where we set which keywords to enumerate
+        self.__dict__ = sr_fields
+        
 cmd = CMDTypes()
-
-# This is where we set the field names and numbers we expect to find for a specified "SR" (Argument Parsing) type
 
 
 def sr_reduce(args,required,ignore_reduce,ignore_gecos):

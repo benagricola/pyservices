@@ -5,6 +5,13 @@ server:
     sid:            '00A'
 }
 
+daemon:
+{
+    root_dir:   '/home/inspircd/pythonservices'
+    pid_file:   './services.pid'
+    uid:        'user' < can be empty or integer
+    gid:        'group' < can be empty or integer
+}
 
 peer_server:
 {
@@ -18,13 +25,16 @@ peer_server:
 
 console:
 {
-    enable_input:   True
+    enable_input:   True    # < BE VERY CAREFUL WITH THIS, SETTING IT TO TRUE WILL 
+                            # FORCE THE APP TO RUN IN THE FOREGROUND. DO NOT START 
+                            # FROM SCRIPTS WITH ENABLE_INPUT TRUE!!! 
 }
 
 logging:
 {
     rotate:                     '7d'
     location:                   './services.log'
+    debug_level:                20  # 0 = show all messages, 50 = show no messages
     console_format:             '%(asctime)-23s $BOLD%(name)-12s$RESET %(levelname)-19s $RESET%(message)s'
     console_max_width:          150
     console_multiline_offset:   49
