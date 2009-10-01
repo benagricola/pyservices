@@ -280,6 +280,9 @@ class SpanningTree12(LineOnlyReceiver):
         self.log.log(cll.level.ERROR,'Unknown command %s received' % cmd)
         return True
     
+    def st_receive_nick(self,*args,**kwargs):
+        self.execute_hook(*args,**kwargs)
+        
     """
         This method is called when required to ping the peer server.
         This could be automatic (on a timeout) or manually when it is 

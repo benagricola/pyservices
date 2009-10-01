@@ -555,9 +555,8 @@ class SQLEnforcer(ext.BaseExtension):
         We want to auto-kill anyone whos' nick gets changed so
         problems are not caused by non-existent nicknames in the DB.
     """
-    def st_receive_nick(self,*args,**kwargs):
-        print args
-        print kwargs
+    def st_receive_nick(self,uid,args):
+        self.protocol.st_send_command('KILL',[uid],self.factory.enforcer.uid,'Nickname changes are not allowed.')
         
         
     """
