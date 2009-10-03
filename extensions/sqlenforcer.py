@@ -1635,15 +1635,18 @@ class SQLEnforcer(ext.BaseExtension):
             usage()
             return
             
-        # Check to see if the user is an OP on that channel
-        if not chan.user_has_mode(user,'o'):
-            access_denied()
-            return
+        
         
         db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,chan.uid)
         db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
         
         if not db_channel and db_user:
+        
+            # Check to see if the user is an OP on that channel
+            if not chan.user_has_mode(user,'o'):
+                access_denied()
+                return
+            
             cfg = self.factory.cfg.sqlextension
             self.factory.db.runOperation \
             (
