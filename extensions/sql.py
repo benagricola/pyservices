@@ -156,7 +156,8 @@ class SQLExtension(ext.BaseExtension):
         trans.execute \
         (
             " SELECT"
-            " r.id as id, r.username as username, r.level as level, r.approved as approved,"
+            " r.id as id, r.username as username, r.level as level,"
+            " r.approved as approved, r.bitmask as bitmask,"
             " (SELECT"
                 " GROUP_CONCAT(c.name SEPARATOR ',')"
                 " FROM " 
@@ -180,7 +181,8 @@ class SQLExtension(ext.BaseExtension):
         trans.execute \
         (
             " SELECT"
-            " r.id as id, r.username as username, r.level as level, r.approved as approved,"
+            " r.id as id, r.username as username, r.level as level,"
+            " r.approved as approved, r.bitmask as bitmask,"
             " (SELECT"
                 " GROUP_CONCAT(c.name SEPARATOR ',')"
                 " FROM " 

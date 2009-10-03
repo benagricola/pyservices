@@ -1133,7 +1133,10 @@ class SQLEnforcer(ext.BaseExtension):
              
         def access_denied():
             self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] <---- READ THIS (Access Denied)')
-          
+         
+        def modes_updated(*args,**kwargs):
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s value USERMODES %s changed to %s' % (kwargs.get('chan'),kwargs.get('function'),kwargs.get('value')))
+            
         if pseudoclient_uid != self.factory.enforcer.uid:
             return
             
@@ -1192,7 +1195,7 @@ class SQLEnforcer(ext.BaseExtension):
             (
                 "UPDATE " + cfg.table_prefix + "_channels SET user_mode_protection = %s WHERE id = %s LIMIT 1", 
                 [value,db_channel['id']]
-            ).addCallbacks(topic_updated,self.query_error_callback,None,{'chan': chan.uid,'function': function,'value': value})
+            ).addCallbacks(modes_updated,self.query_error_callback,None,{'chan': chan.uid,'function': function,'value': value})
 
         
         return
@@ -1222,7 +1225,10 @@ class SQLEnforcer(ext.BaseExtension):
              
         def access_denied():
             self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] <---- READ THIS (Access Denied)')
-          
+        
+        def modes_updated(*args,**kwargs):
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s value CHANMODES %s changed to %s' % (kwargs.get('chan'),kwargs.get('function'),kwargs.get('value')))
+            
         if pseudoclient_uid != self.factory.enforcer.uid:
                 return
             
@@ -1281,7 +1287,7 @@ class SQLEnforcer(ext.BaseExtension):
             (
                 "UPDATE " + cfg.table_prefix + "_channels SET channel_mode_protection = %s WHERE id = %s LIMIT 1", 
                 [value,db_channel['id']]
-            ).addCallbacks(topic_updated,self.query_error_callback,None,{'chan': chan.uid,'function': function,'value': value})
+            ).addCallbacks(modes_updated,self.query_error_callback,None,{'chan': chan.uid,'function': function,'value': value})
 
         
         return
