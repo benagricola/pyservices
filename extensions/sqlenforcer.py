@@ -233,10 +233,10 @@ class SQLEnforcer(ext.BaseExtension):
         # remove them if the channel is not public
        
         if effective_level < db_channel['min_level'] and not public:
-        
-            banmask = '*!*@%s' % user.displayed_hostname
-            
             cfg_bad_behaviour = self.factory.cfg.sqlextension.services.enforcer.bad_behaviour
+            
+            banmask = cfg_bad_behaviour.banmask % user.__dict__
+
             if not self.bad_behaviour(user,cfg_bad_behaviour.value_accessdenied_enforce,cfg_bad_behaviour.timeout_accessdenied_enforce):
                     
                 self.protocol.st_send_command('SVSMODE',[channel.uid,'-o+b',user.uid,banmask],self.factory.enforcer.uid)
@@ -345,10 +345,10 @@ class SQLEnforcer(ext.BaseExtension):
     @defer.inlineCallbacks
     def st_receive_fmode(self,source_uid,channel,timestamp,modes):
         def mode_updated(*args,**kwargs):
-            self.protocol.st_send_command('NOTICE',[source_uid],self.factory.enforcer.uid,'Channel %s mode %s recorded: %s' % (kwargs.get('chan'),kwargs.get('mode'),kwargs.get('value')))
+            self.protocol.st_send_command('NOTICE',[source_uid],self.factory.enforcer.uid,'Channel %s mode %s recorded value: %s' % (kwargs.get('chan'),kwargs.get('mode'),kwargs.get('value')))
         
         def mode_deleted(*args,**kwargs):
-            self.protocol.st_send_command('NOTICE',[source_uid],self.factory.enforcer.uid,'Channel %s mode %s removed: %s'% (kwargs.get('chan'),kwargs.get('mode'),kwargs.get('value')))
+            self.protocol.st_send_command('NOTICE',[source_uid],self.factory.enforcer.uid,'Channel %s mode %s removed value: %s'% (kwargs.get('chan'),kwargs.get('mode'),kwargs.get('value')))
             
         user = self.protocol.lookup_uid(source_uid)
         

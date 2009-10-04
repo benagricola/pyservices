@@ -77,6 +77,7 @@ sqlextension:
             ident:      'enforcer'
             realname:   'The Enforcer'
             
+            
             ban_accessdenied_expiry:    600 # Seconds
             
             enforce_chancreate_limit: True
@@ -87,6 +88,8 @@ sqlextension:
                 enabled:    True,
                 threshold:  50,
                 timeout:    600,
+                
+                banmask: '%(nick)s!*@*' # '%(nick)s!%(ident)s@%(displayed_hostname)s'
                 
                 reason:     'AUTOKILLED: Persistent terrible behaviour >:(',
                 warning:    'If you misbehave further you will be killed [%s/%s]', # Current Bad Points / Current Threshold for killing
