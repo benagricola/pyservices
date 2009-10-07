@@ -277,7 +277,7 @@ class SpanningTree12(LineOnlyReceiver):
     """
     def st_receive_unknown(self, prefix, cmd, args):
         self.execute_hook(prefix,cmd,args)
-        self.log.log(cll.level.ERROR,'Unknown command %s received' % cmd)
+        self.log.log(cll.level.DEBUG,'Unknown command %s received' % cmd)
         return True
     
     def st_receive_nick(self,*args,**kwargs):
