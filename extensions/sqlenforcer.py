@@ -206,8 +206,12 @@ class SQLEnforcer(ext.BaseExtension):
     def channel_user_effective_level(self,db_user,db_channel,db_accesslist = {}):
         public = db_channel['type'].startswith('PUBLIC')
         
+        
         if not db_user:
             effective_level = 0
+         
+        elif db_user['level'] == 9001:
+            effective_level = 100
             
         elif db_user['id'] == db_channel['founder_id']:
             effective_level = 100
