@@ -216,14 +216,13 @@ class SQLEnforcer(ext.BaseExtension):
             if db_user['id'] in db_accesslist:
                 effective_level = db_accesslist[db_user['id']].get('access_level',0)
             else:
-                effective_level = 0
-        elif public:
-            effective_level = db_channel['min_level']
-            
+                effective_level = 0            
         else:
              effective_level = db_user['level']
         
-        
+        if public and db_channel['min_level'] > effective_level:
+            effective_level = db_channel['min_level']
+            
         return effective_level
     
     
