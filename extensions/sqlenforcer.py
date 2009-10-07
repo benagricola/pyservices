@@ -226,7 +226,7 @@ class SQLEnforcer(ext.BaseExtension):
         
         if public and db_channel['min_level'] > effective_level:
             effective_level = db_channel['min_level']
-            
+         
         return effective_level
     
     
