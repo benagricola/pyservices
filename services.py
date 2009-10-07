@@ -13,7 +13,7 @@
 """
 
 __servicesname__        = 'PyServices'
-__version__             = '0.45'
+__version__             = '0.55'
 __author__              = 'MaZ <maz@lawlr.us>'
 
 
