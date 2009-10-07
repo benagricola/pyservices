@@ -81,7 +81,9 @@ class SQLEnforcer(ext.BaseExtension):
         self.log.log(cll.level.DATABASE,'Query encountered error: %s' % error.value)
         return True
         
-        
+    def kill_user(self,nick):
+        self.protocol.st_send_command('KILL',[nick],self.factory.enforcer.uid,'Your nick has been updated or removed.')
+        return True
         
     def bad_behaviour(self,user,value,timeout=600):
         cfg_bad_behaviour = self.factory.cfg.sqlextension.services.enforcer.bad_behaviour
@@ -331,6 +333,10 @@ class SQLEnforcer(ext.BaseExtension):
                 modes = uitem.get('modes')
                 
                 db_user = db_users.get(user.nick,None)
+                
+                if not db_user:
+                    self.kill_user(user.nick)
+                    
                 self.enforce_user_modes(user,db_user,channel,db_channel,db_accesslist)
                 
         else:   
@@ -390,6 +396,10 @@ class SQLEnforcer(ext.BaseExtension):
             if tools.contains_any('X',_type) and param not in passed and ump:
                 passed.append(param)
                 db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,param.nick)
+                
+                if not db_user:
+                    self.kill_user(param.nick)
+                    
                 self.enforce_user_modes(param,db_user,channel,db_channel,db_accesslist)
                 
             elif cmp and tools.contains_any('BCD',_type):
@@ -403,6 +413,11 @@ class SQLEnforcer(ext.BaseExtension):
                 else:
                     db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
                     
+                    if not db_user:
+                        self.kill_user(user.nick)
+                        self.enforce_channel_mode(channel=channel,db_modes=db_channel_modes,mode=mode,value=value) 
+                        return
+                        
                     # First check if the user who set the mode was founder, if so, save it
                     # Else enforce mode change
                     if db_user['id'] == db_channel['founder_id']:
@@ -492,6 +507,9 @@ class SQLEnforcer(ext.BaseExtension):
                 for user in users:
                     user_uid = self.protocol.lookup_uid(user)
                     db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user_uid.nick)
+                    if not db_user:
+                        self.kill_user(user_uid.nick)
+                        return
                     self.enforce_create_channel_access(user_uid,db_user,channel_uid)
             return
                 
@@ -526,6 +544,9 @@ class SQLEnforcer(ext.BaseExtension):
                 if not user_uid:
                     break
                 db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user_uid.nick)
+                if not db_user:
+                    self.kill_user(user_uid.nick)
+                    return
                 self.enforce_user_modes(user_uid,db_user,channel_uid,db_channel,db_accesslist)
         
 
@@ -577,8 +598,9 @@ class SQLEnforcer(ext.BaseExtension):
         db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
         
         if not db_user:
-            self.log.log(cll.level.ERROR,'User was not found in database (THIS SHOULD NEVER HAPPEN)')
+            self.kill_user(user.nick)
             return
+            
         self.user_trigger_welcome(user,db_user)
         
     
@@ -690,6 +712,11 @@ class SQLEnforcer(ext.BaseExtension):
        
         db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,chan.uid)
         db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
+        
+        if not db_user:
+            self.kill_user(user.nick)
+            return
+            
         if not db_channel:
             not_registered()
             return
@@ -795,9 +822,11 @@ class SQLEnforcer(ext.BaseExtension):
             
         db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
         
-
+        if not db_user:
+            self.kill_user(user.nick)
+            return
         
-        if not db_user or (not db_channel and function in ('ADD','DEL')):
+        if not db_channel and function in ('ADD','DEL'):
             usage()
             return
 
@@ -907,7 +936,11 @@ class SQLEnforcer(ext.BaseExtension):
         db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,channel.uid)
         db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
         
-        if not db_user or not db_channel:
+        if not db_user:
+            self.kill_user(user.nick)
+            return
+            
+        if not db_channel:
             usage()
             return
             
@@ -1091,6 +1124,14 @@ class SQLEnforcer(ext.BaseExtension):
         db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,channel.uid)
         db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
         
+        if not db_user:
+            self.kill_user(user.nick)
+            return
+        
+        if not db_channel:
+            usage()
+            return      
+            
         # If user is not the channel founder, show message
         if db_channel['founder_id'] != db_user['id']:
             access_denied()
@@ -1181,6 +1222,14 @@ class SQLEnforcer(ext.BaseExtension):
         db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,chan.uid)
         db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
         
+        if not db_user:
+            self.kill_user(user.nick)
+            return
+        
+        if not db_channel:
+            usage()
+            return   
+            
         # If user is not the channel founder, show message
         if db_channel['founder_id'] != db_user['id']:
             access_denied()
@@ -1273,6 +1322,14 @@ class SQLEnforcer(ext.BaseExtension):
         db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,chan.uid)
         db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
         
+        if not db_user:
+            self.kill_user(user.nick)
+            return
+        
+        if not db_channel:
+            usage()
+            return       
+            
         # If user is not the channel founder, show message
         if db_channel['founder_id'] != db_user['id']:
             access_denied()
@@ -1377,6 +1434,14 @@ class SQLEnforcer(ext.BaseExtension):
         db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,chan.uid)
         db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
         
+        if not db_user:
+            self.kill_user(user.nick)
+            return
+        
+        if not db_channel:
+            usage()
+            return     
+            
         # If user is not the channel founder, show message
         if db_channel['founder_id'] != db_user['id']:
             access_denied()
@@ -1506,9 +1571,14 @@ class SQLEnforcer(ext.BaseExtension):
         db_channel_accesslist = yield self.factory.db.runInteraction(self.sqe.get_channel_accesslist,chan.uid)
         db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
         
-        
-        if not db_channel or not db_user:
+        if not db_user:
+            self.kill_user(user.nick)
             return
+        
+        if not db_channel:
+            usage()
+            return     
+            
             
             
         # If user is not the channel founder, proceed to more rigorous access checks
@@ -1640,6 +1710,11 @@ class SQLEnforcer(ext.BaseExtension):
         db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,chan.uid)
         db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
         
+        if not db_user:
+            self.kill_user(user.nick)
+            return
+        
+
         if not db_channel and db_user:
         
             # Check to see if the user is an OP on that channel
