@@ -1220,9 +1220,10 @@ class SpanningTree12(LineOnlyReceiver):
         self.log.log(cll.level.INFO,'Inbound network burst completed')
         if self.factory.is_bursting:
             def reset_burst():
+                self.log.log(cll.level.INFO,'Burst finished')
                 self.factory.is_bursting = False
                 
-            reactor.callLater(10,reset_burst)
+            reactor.callLater(5,reset_burst)
             
             
             if not self.factory.connected:

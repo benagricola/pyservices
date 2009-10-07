@@ -633,6 +633,7 @@ class SQLEnforcer(ext.BaseExtension):
     @defer.inlineCallbacks
     def user_trigger_welcome(self,user,db_user):
         ajchans = db_user.get('autojoin')
+
         if not self.factory.is_bursting:
             if ajchans:
                 for chan in ajchans.split(','):
@@ -640,20 +641,17 @@ class SQLEnforcer(ext.BaseExtension):
                     db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,chan)
                     
                     # If autojoin contains an invalid channel, skip it
-                    if not db_channel:
-                        continue
-                    
-                    db_channel_accesslist = yield self.factory.db.runInteraction(self.sqe.get_channel_accesslist,chan)
-                    
-      
-                    
-                    effective_level = channel_user_effective_level(self,db_user,db_channel,db_channel_accesslist)   
-                    
-                    if effective_level >= db_channel['min_level']:
-                        self.invite_svsjoin(user,chan)
-                    else:
-                        self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,'Did not AJOIN you to %s because you do not have sufficient access privileges.' % (user.nick,chan))
-                        self.log.log(cll.level.INFO,'User %s has no access to %s' % (user.nick,chan))
+                    if db_channel:
+
+                        db_channel_accesslist = yield self.factory.db.runInteraction(self.sqe.get_channel_accesslist,chan)
+
+                        effective_level = self.channel_user_effective_level(db_user,db_channel,db_channel_accesslist)   
+                        
+                        if effective_level >= db_channel['min_level']:
+                            self.invite_svsjoin(user,chan)
+                        else:
+                            self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,'Did not AJOIN you to %s because you do not have sufficient access privileges.' % (user.nick,chan))
+                            self.log.log(cll.level.INFO,'User %s has no access to %s' % (user.nick,chan))
                     
                         
             self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,'Welcome %s! Your current global access level is %s.' % (user.nick,db_user.get('level',0)))
