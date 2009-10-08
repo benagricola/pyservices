@@ -1478,7 +1478,78 @@ class SQLEnforcer(ext.BaseExtension):
         
         return
             
-    
+    @defer.inlineCallbacks    
+    def ps_privmsg_chaninfo(self,source_uid,command,message,pseudoclient_uid):
+        """
+            Usage:          CHANINFO #channel
+            Access:         CHANNEL ACCESS
+            Description:    Returns info about a channel including channel mode,
+                            founder settings and more.
+        """
+        
+        def usage():
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[CHANNEL ACCESS] Syntax: CHANACC #channel ADD | DEL | LIST <nick | search_string> [<1-100>]')
+        
+        def access_denied():
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[CHANNEL ACCESS] <---- READ THIS (Access Denied)')
+            
+        def no_channel(channel):
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s does not exist' % (channel))
+        
+        
+        if pseudoclient_uid != self.factory.enforcer.uid:
+            return
+        
+        channel = message
+        # First make sure the channel name is valid
+        if not channel.startswith('#'):
+            usage()
+            return 
+   
+        chan = self.protocol.lookup_uid(message)
+        user = self.protocol.lookup_uid(source_uid)
+        # Make sure the channel exists
+        if not chan:
+            no_channel()
+            return
+        
+        if not user:
+            usage()
+            return
+            
+        
+        
+        db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,chan.uid)
+        db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
+        
+        if not db_user:
+            self.kill_user(user.nick)
+            return
+        
+        db_channel_accesslist = yield self.factory.db.runInteraction(self.sqe.get_channel_accesslist,chan.uid)
+        effective_level = self.channel_user_effective_level(db_user,db_channel,db_channel_accesslist)       
+        
+        # If user is not the channel founder, show message
+        if effective_level < 1:
+            access_denied()
+            return 
+            
+        self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Information about channel %s:' % (chan.uid))    
+        self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,tools.pad('  CHANTYPE:' ,30) + ' %s' % (db_channel['type']))        
+        self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,tools.pad('  FOUNDER:' ,30) + ' %s' % (db_channel['founder_name'])) 
+        self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,tools.pad('  TOPIC PROTECTION:' ,30) + ' %s' % (db_channel['topic_protection'])) 
+        if db_channel['topic_protection']:
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,tools.pad('  SAVED TOPIC:' ,30) + ' %s' % (db_channel['topic'])) 
+            
+        self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,tools.pad('  CHANNEL MODE PROTECTION:' ,30) + ' %s' % (db_channel['channel_mode_protection'])) 
+        self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,tools.pad('  USER MODE PROTECTION:' ,30) + ' %s' % (db_channel['user_mode_protection'])) 
+        
+        self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,tools.pad('  LEVELS:' ,30) + ' Min %(min_level)s, Voice %(level_voice)s, Hop %(level_halfop)s, Op %(level_op)s, Sop %(level_superop)s' % (db_channel))
+        
+        self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,tools.pad('  LEVEL SETTINGS:' ,30) + ' %s' % (db_channel['level_settings'])) 
+        
+        
+        
     @defer.inlineCallbacks    
     def ps_privmsg_chanacc(self,source_uid,command,message,pseudoclient_uid):
         """
