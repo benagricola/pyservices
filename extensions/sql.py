@@ -208,6 +208,7 @@ class SQLExtension(ext.BaseExtension):
                 " c.level_halfop as level_halfop, c.level_op as level_op,"
                 " c.level_superop as level_superop,"
                 " c.level_settings as level_settings,"
+                " c.bit as bit,"
                 " u.username as founder_name,"
                 " c.channel_mode_protection as channel_mode_protection,"
                 " c.user_mode_protection as user_mode_protection"

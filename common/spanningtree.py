@@ -991,12 +991,15 @@ class SpanningTree12(LineOnlyReceiver):
         # Check to see if the user exists so we can modify it if it does.
         user = self.lookup_uid(prefix)
         
-        channel = self.lookup_uid(_sr.get('channel'))
+        if user:
+            channel = self.lookup_uid(_sr.get('channel'))
 
-        self.execute_hook(user=user,channel=channel)
-        
-        self.log.log(cll.level.VERBOSE,'PART: Removed user %s from %s ' % (user.uid,channel.uid))
-        del channel.users[user.uid]
+            if channel:
+                self.execute_hook(user=user,channel=channel)
+                
+               
+                self.log.log(cll.level.VERBOSE,'PART: Removed user %s from %s ' % (user.uid,channel.uid))
+                del channel.users[user.uid]
         
         return True
         

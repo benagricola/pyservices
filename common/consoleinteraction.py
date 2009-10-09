@@ -35,6 +35,7 @@ class ConsoleInteraction(LineOnlyReceiver):
         self.linked_generator = linked_generator
         self.cfg = cfg
         self.config_file = config_file
+        
     def prompt(self):
         if self.raw:
             self.transport.write(self.raw_prompt_string)
@@ -45,13 +46,13 @@ class ConsoleInteraction(LineOnlyReceiver):
         self.factory,self.connector = self.linked_generator(self.cfg,self.config_file)
         
     
-
     def lineReceived(self, line):
         line = line.strip()
         
-        if not line and self.factory.connected:
+        if len(line) < 1 and self.factory.connected:
             if not self.ready_for_cmd:
                 self.prompt()
+                reactor.callLater(10, self.closeprompt)
                 self.ready_for_cmd = True
             else:
                 self.ready_for_cmd = False
@@ -60,6 +61,7 @@ class ConsoleInteraction(LineOnlyReceiver):
         elif self.ready_for_cmd and line.upper() == 'RAW':
             self.raw = True
             self.prompt()
+            
             return
             
         elif not self.factory.connected or not self.ready_for_cmd:
@@ -71,11 +73,17 @@ class ConsoleInteraction(LineOnlyReceiver):
             self.raw = False
             self.ready_for_cmd = True
             self.prompt()
+            reactor.callLater(10, self.closeprompt)
         else:
             self.ready_for_cmd = self.handleCommand(line)
         
             if self.ready_for_cmd:
                 self.prompt()
+                reactor.callLater(10, self.closeprompt)
+     
+    def closeprompt(self):
+        self.ready_for_cmd = False
+        self.transport.write("\n")
         
     def handleCommand(self,line):
     
@@ -183,7 +191,6 @@ class ConsoleInteraction(LineOnlyReceiver):
         
     def con_unknown(self,line,cmd,subcmd,tokens):
         self.transport.write(colour.format_colour(colour.RED,'Unknown command %s' % (line)) + self.delimiter)
-        self.prompt()
         return True
         
     def issueCommand(self, command):

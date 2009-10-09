@@ -165,8 +165,15 @@ class SQLEnforcer(ext.BaseExtension):
                     # At this point we enforce the topic at all times, since we don't know who
                     # set it last.
                     self.protocol.st_send_command('TOPIC',[channel.uid],self.factory.enforcer.uid,db_topic)
+                    return
                     
-                elif db_user['id'] != db_channel['founder_id']:
+                db_accesslist = yield self.factory.db.runInteraction(self.sqe.get_channel_accesslist,channel.uid)
+                
+                effective_level = self.channel_user_effective_level(db_user,db_channel,db_accesslist)   
+                    
+                # First check if the user who set the topic was founder or admin, if so, save it
+                # Else enforce mode change
+                if effective_level < 101 and db_user['id'] != db_channel['founder_id']:
                     # Channel topic is incorrect and must be enforced, this user is not channel founder
                     self.protocol.st_send_command('TOPIC',[channel.uid],self.factory.enforcer.uid,db_topic)
                     cfg_bad_behaviour = self.factory.cfg.sqlextension.services.enforcer.bad_behaviour
@@ -196,7 +203,43 @@ class SQLEnforcer(ext.BaseExtension):
         self.log.log(cll.level.DEBUG,'Unbanned %s on %s (Timeban Expiry)' % (banmask,channel.uid))
         
      
+    """ 
+        This function returns a boolean depending on if a user is on a channel
+        access list or not.
+    """
+    def channel_user_in_accesslist(self,db_user,db_channel,db_accesslist = {}):
+        public = db_channel['type'].startswith('PUBLIC')
+         
+        if not db_user:
+            return False
+    
+        elif db_user['level'] == 9001:
+            return True
+            
+        elif db_user['id'] == db_channel['founder_id']:
+            return True
+        
+        elif db_channel['type'] in ('BITMASK'):
+      
+            if (db_channel['bit'] & db_user['bitmask']) == db_channel['bit']:
+                return True
+            else:
+                return False
+                
+        elif db_channel['type'] in ('ACCESSLIST','PUBLIC_ACCESSLIST'): 
+        
+            if db_user['id'] in db_accesslist:
+                return True
+            else:
+                return False
+                
+        elif public: 
+            return True
+        else:
+             return False
 
+        
+        
     """ 
         This function calculates a users' effective level
         on a channel using a number of methods, depending
@@ -208,19 +251,21 @@ class SQLEnforcer(ext.BaseExtension):
         
         
         if not db_user:
-            effective_level = 0
+            effective_level = -1
          
         elif db_user['level'] == 9001:
-            effective_level = 100
+            effective_level = 101
             
         elif db_user['id'] == db_channel['founder_id']:
             effective_level = 100
 
-        elif db_channel['type'] in ('ACCESSLIST','PUBLIC_ACCESSLIST'): 
+        elif db_channel['type'] in ('ACCESSLIST','PUBLIC_ACCESSLIST','BITMASK'): 
+        
             if db_user['id'] in db_accesslist:
-                effective_level = db_accesslist[db_user['id']].get('access_level',0)
+                return db_accesslist[db_user['id']].get('access_level',-1)
             else:
-                effective_level = 0            
+                effective_level = -1   
+                
         else:
              effective_level = db_user['level']
         
@@ -250,7 +295,9 @@ class SQLEnforcer(ext.BaseExtension):
         # than the minimum level for this channel, otherwise
         # remove them if the channel is not public
        
-        if effective_level < db_channel['min_level']:
+        in_accesslist = self.channel_user_in_accesslist(db_user,db_channel,db_accesslist)
+        
+        if (not in_accesslist or effective_level < db_channel['min_level']) and not public:
             cfg_bad_behaviour = self.factory.cfg.sqlextension.services.enforcer.bad_behaviour
             
             banmask = cfg_bad_behaviour.banmask % user.__dict__
@@ -259,12 +306,13 @@ class SQLEnforcer(ext.BaseExtension):
                     
                 self.protocol.st_send_command('SVSMODE',[channel.uid,'-o+b',user.uid,banmask],self.factory.enforcer.uid)
                 self.protocol.st_send_command('SVSPART',[user.uid,channel.uid],self.factory.enforcer.uid)
-                self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,'Access to %s denied by user level (%s < %s). You have been banned for %ss' % (channel.uid,effective_level,db_channel['min_level'],cfg_enforcer.ban_accessdenied_expiry))
+                self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,'Access to %s denied by user level or access list. You have been banned for %ss' % (channel.uid,cfg_enforcer.ban_accessdenied_expiry))
                 
                 reactor.callLater(cfg_enforcer.ban_accessdenied_expiry, self.do_unban,channel=channel,banmask=banmask)
                 
                 self.log.log(cll.level.DEBUG,'Banned %s on %s (%ss Access denied timeban)' % (banmask,channel.uid,cfg_enforcer.ban_accessdenied_expiry))
-                
+            
+                        
             return
 
         give_user = ''
@@ -434,9 +482,11 @@ class SQLEnforcer(ext.BaseExtension):
                         self.enforce_channel_mode(channel=channel,db_modes=db_channel_modes,mode=mode,value=value) 
                         return
                         
+                    effective_level = self.channel_user_effective_level(db_user,db_channel,db_accesslist)   
+                    
                     # First check if the user who set the mode was founder, if so, save it
                     # Else enforce mode change
-                    if db_user['id'] == db_channel['founder_id']:
+                    if effective_level > 100 or db_user['id'] == db_channel['founder_id']:
                         # User is founder, modify / delete mode
                         
                         value = param
@@ -578,7 +628,11 @@ class SQLEnforcer(ext.BaseExtension):
                 
                 cfg_bad_behaviour = self.factory.cfg.sqlextension.services.enforcer.bad_behaviour
                 if not self.bad_behaviour(user,cfg_bad_behaviour.value_chancreatedenied_enforce,cfg_bad_behaviour.timeout_chancreatedenied_enforce):
-                        
+                    self.protocol.st_send_command('SVSPART',[user.uid,channel.uid],self.factory.enforcer.uid)
+                    self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,'Channel %s creation denied by user level (%s < %s).' % (channel.uid,effective_level,cfg_enforcer.level_chancreate_min))
+                    
+                    self.log.log(cll.level.DEBUG,'Parted %s on %s (Channel Create denied)' % (user.nick,channel.uid))
+                elif not cfg_bad_behaviour.enabled:
                     self.protocol.st_send_command('SVSPART',[user.uid,channel.uid],self.factory.enforcer.uid)
                     self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,'Channel %s creation denied by user level (%s < %s).' % (channel.uid,effective_level,cfg_enforcer.level_chancreate_min))
                     
@@ -1059,14 +1113,104 @@ class SQLEnforcer(ext.BaseExtension):
         
         return True
         
+    
+    """
+        Set the bit of a channel for use with chantype BITMASK 
+    """
+    @defer.inlineCallbacks
+    def ps_privmsg_chanbit(self,command,message,pseudoclient_uid,source_uid):    
+        """
+            Usage:          CHANBIT #channel BIT_VALUE
+            Access:         FOUNDER ONLY
+            Description:    Sets the bit value of a channel for use with 
+                            the chantype BITMASK.
+                            
+            
+        """
+    
+        def usage():
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] Syntax: CHANBIT #channel <int>')
         
+        def no_change(chan,bit):
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s already has bit %s' % (chan,bit))
+        
+        def access_denied():
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] <---- READ THIS (Access Denied)')
+            
+        def bit_updated(*args,**kwargs):
+            chan = kwargs.get('chan')
+            self.access_level_pass(users=chan.users,channel=chan)
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s bit value changed to: %s' % (chan.uid,kwargs.get('bit')))
+        
+        if pseudoclient_uid != self.factory.enforcer.uid:
+            return
+        
+        channel_name = ''
+        new_bit = ''
+        
+        try:
+        
+            channel_name,bit_str = message.split(' ')
+            
+            new_bit = int(bit_str)
+            
+            if(new_bit < 0):
+                raise ValueError('Invalid Type')
+                
+        except ValueError:
+            usage()
+            return
+        
+        channel = self.protocol.lookup_uid(channel_name)
+        user = self.protocol.lookup_uid(source_uid)
+            
+        if not channel or not user:
+            usage()
+            return
+        
+        db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,channel.uid)
+        db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
+        
+        if not db_user:
+            self.kill_user(user.nick)
+            return
+        
+        if not db_channel:
+            usage()
+            return      
+            
+            
+        db_channel_accesslist = yield self.factory.db.runInteraction(self.sqe.get_channel_accesslist,channel.uid)
+        effective_level = self.channel_user_effective_level(db_user,db_channel,db_channel_accesslist)       
+        
+        # If user is not the channel founder, show message
+        if effective_level < 101 and db_user['id'] != db_channel['founder_id']:
+            access_denied()
+            return 
+
+        if db_channel['bit'] == new_bit:
+            no_change(channel.uid,new_bit)
+            return
+
+        cfg = self.factory.cfg.sqlextension
+        self.factory.db.runOperation \
+            (
+                "UPDATE " + cfg.table_prefix + "_channels SET bit = %s WHERE id = %s LIMIT 1", 
+                [new_bit,db_channel['id']]
+            ).addCallbacks(bit_updated,self.query_error_callback,None,{'chan': channel,'bit': new_bit})
+        
+
+        return
+
+        
+            
     """
         Set the channel type of a channel
     """
     @defer.inlineCallbacks
     def ps_privmsg_chantype(self,command,message,pseudoclient_uid,source_uid):
         """
-            Usage:          CHANTYPE #channel [PUBLIC_]USERLEVEL|ACCESSLIST
+            Usage:          CHANTYPE #channel [PUBLIC_]USERLEVEL|[PUBLIC_]ACCESSLIST|BITMASK
             Access:         FOUNDER ONLY
             Description:    Sets the type of channel for authentication purposes.
                             
@@ -1084,7 +1228,7 @@ class SQLEnforcer(ext.BaseExtension):
         """
         
         def usage():
-            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] Syntax: CHANTYPE #channel [PUBLIC_]USERLEVEL|ACCESSLIST')
+            self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'[FOUNDER ONLY] Syntax: CHANTYPE #channel [PUBLIC_]USERLEVEL|[PUBLIC_]ACCESSLIST|BITMASK')
         
         def no_change(chan,typename):
             self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Channel %s already has type %s' % (chan,typename))
@@ -1107,7 +1251,7 @@ class SQLEnforcer(ext.BaseExtension):
             channel_name,new_type = message.split(' ')
             new_type = new_type.upper()
             
-            if new_type not in ('PUBLIC_USERLEVEL','PUBLIC_ACCESSLIST','USERLEVEL','ACCESSLIST'):
+            if new_type not in ('PUBLIC_USERLEVEL','PUBLIC_ACCESSLIST','USERLEVEL','ACCESSLIST','BITMASK'):
                 raise ValueError('Invalid Type')
             
         except ValueError:
@@ -1136,7 +1280,7 @@ class SQLEnforcer(ext.BaseExtension):
         effective_level = self.channel_user_effective_level(db_user,db_channel,db_channel_accesslist)       
         
         # If user is not the channel founder, show message
-        if effective_level < 100:
+        if effective_level < 101 and db_user['id'] != db_channel['founder_id']:
             access_denied()
             return 
 
@@ -1506,12 +1650,10 @@ class SQLEnforcer(ext.BaseExtension):
             usage()
             return 
    
-        chan = self.protocol.lookup_uid(message)
+        
         user = self.protocol.lookup_uid(source_uid)
-        # Make sure the channel exists
-        if not chan:
-            no_channel()
-            return
+        
+        
         
         if not user:
             usage()
@@ -1519,14 +1661,19 @@ class SQLEnforcer(ext.BaseExtension):
             
         
         
-        db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,chan.uid)
+        db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,channel)
         db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
         
         if not db_user:
             self.kill_user(user.nick)
             return
         
-        db_channel_accesslist = yield self.factory.db.runInteraction(self.sqe.get_channel_accesslist,chan.uid)
+        # Make sure the channel exists
+        if not db_channel:
+            no_channel(channel)
+            return
+            
+        db_channel_accesslist = yield self.factory.db.runInteraction(self.sqe.get_channel_accesslist,channel)
         effective_level = self.channel_user_effective_level(db_user,db_channel,db_channel_accesslist)       
         
         # If user is not the channel founder, show message
@@ -1534,7 +1681,7 @@ class SQLEnforcer(ext.BaseExtension):
             access_denied()
             return 
             
-        self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Information about channel %s:' % (chan.uid))    
+        self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,'Information about channel %s:' % (channel))    
         self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,tools.pad('  CHANTYPE:' ,30) + ' %s' % (db_channel['type']))        
         self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,tools.pad('  FOUNDER:' ,30) + ' %s' % (db_channel['founder_name'])) 
         self.protocol.st_send_command('NOTICE',[source_uid],pseudoclient_uid,tools.pad('  TOPIC PROTECTION:' ,30) + ' %s' % (db_channel['topic_protection'])) 

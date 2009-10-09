@@ -15,6 +15,8 @@ import logging
 
 from twisted.internet.protocol import ReconnectingClientFactory
 
+import common.config as config
+
 import common.spanningtree as spanningtree
 import common.log_levels as cll
 import common.tools as tools
