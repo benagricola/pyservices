@@ -54,13 +54,6 @@ def sr_reduce(args,required,ignore_reduce,reduce_gecos):
 
         args[_l:_r] = [' '.join(args[_l:_r])]
 
-        print _l
-        
-        print _r
-        
-        
-        print args
-
     elif len(args) < required:
         if not ignore_reduce:
             raise ValueError('Given argument list contained less arguments than expected and you did not allow SR to reduce the arguments (set ignore_reduce = True on sr_assoc)')
