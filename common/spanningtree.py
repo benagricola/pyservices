@@ -810,7 +810,7 @@ class SpanningTree12(LineOnlyReceiver):
     
         # Turn the list of fields and arguments into a keyed dictionary
         try:
-            _sr = sr_assoc(cmd.FJOIN,args,ignore_reduce=True)
+            _sr = sr_assoc(cmd.FJOIN,args,ignore_reduce=True,reduce_gecos=False)
 
         except ValueError:
             self.log.log(cll.level.ERROR,'FJOIN command returned wrong number of arguments.')
@@ -904,10 +904,8 @@ class SpanningTree12(LineOnlyReceiver):
     def st_receive_fmode(self,prefix,args):
         # Turn the list of fields and arguments into a keyed dictionary
         try:
-            
-            print args
 
-            _sr = sr_assoc(cmd.FMODE,args,ignore_reduce=True,reduce_gecos=True)
+            _sr = sr_assoc(cmd.FMODE,args,ignore_reduce=True,)
         except ValueError:
             self.log.log(cll.level.ERROR,'FMODE command returned wrong number of arguments.')
             self.st_send_error('FMODE command returned wrong number of arguments.')
@@ -917,10 +915,12 @@ class SpanningTree12(LineOnlyReceiver):
         target = self.lookup_uid(_sr.get('target'))
         del _sr['target']
         
+  
         _modes = self.seperate_modes(_sr.get('modes'),_sr.get('parameters'),target)
         del _sr['parameters']
         _sr['modes'] = _modes
             
+
         #If target is a server, don't bother for the time being
         if isinstance(target,uid.Server):
             return True

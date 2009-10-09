@@ -50,10 +50,13 @@ def initiate_spanningtree(cfg,config_file):
     
     
 class ServicesDaemon(daemon.Daemon):
-    default_config = './services.conf'
+    
+    default_config = os.path.join(sys.path[0],'services.conf')
+    
     
 
     def run(self):
+        
         if self.cfg.console.enable_input:
             stdio_handler = consoleinteraction.ConsoleInteraction(self.cfg,self.config_filename,initiate_spanningtree)
             chandler = stdio.StandardIO(stdio_handler)
@@ -65,6 +68,7 @@ class ServicesDaemon(daemon.Daemon):
         
   
     def parse_config(self):
+        
         self.cfg = config.Config(file(self.config_filename))
         
         if self.cfg.console.enable_input:

@@ -61,13 +61,14 @@ def sr_reduce(args,required,ignore_reduce,reduce_gecos):
         
         _l = required - len(args)
         
-        if reduce_gecos:
+        if not reduce_gecos:
             gecos = args.pop()
             args.extend(itertools.repeat('',_l))
             args.append(gecos)
         else:
             args.extend(itertools.repeat('',_l))
     
+        
     return args
     
     

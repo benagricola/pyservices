@@ -420,10 +420,6 @@ class SQLEnforcer(ext.BaseExtension):
         def mode_deleted(*args,**kwargs):
             self.protocol.st_send_command('NOTICE',[source_uid],self.factory.enforcer.uid,'Channel %s mode %s removed value: %s'% (kwargs.get('chan'),kwargs.get('mode'),kwargs.get('value')))
             
-
-        
-
-        
         if not channel:
             self.log.log(cll.level.ERROR,'We received a hook FMODE but the channel could not be looked up by UID :wtc:')
             return
@@ -485,6 +481,7 @@ class SQLEnforcer(ext.BaseExtension):
                         
                     effective_level = self.channel_user_effective_level(db_user,db_channel,db_accesslist)   
                     
+                 
                     # First check if the user who set the mode was founder, if so, save it
                     # Else enforce mode change
                     if effective_level > 100 or db_user['id'] == db_channel['founder_id']:
@@ -565,7 +562,9 @@ class SQLEnforcer(ext.BaseExtension):
             return
         
         db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,channel_uid.uid)
-            
+        
+
+        
         if not db_channel:
             # Channel is not registered
             # If this is a single user join, check to see if they have 
@@ -588,17 +587,43 @@ class SQLEnforcer(ext.BaseExtension):
         # This means that when a channel is created by a join, its' 
         # enforced modes are set during that join.
         am = tools.applied_modes(modes)
-        for mode, value in db_channel_modes.items():
-            if mode in am:
-                continue
-                
-            _type = self.protocol.lookup_mode_type(mode,channel_uid)
+
+        
+     
+        if db_channel['channel_mode_protection']:
+        
+            remove_modes = []
+            remove_values = []
             
-            if tools.contains_any('BCD',_type):
-                self.protocol.st_send_command('SVSMODE',[channel_uid.uid,'+' + mode,value],self.factory.enforcer.uid)
-                
-                
+            for mode, value in am.items():
             
+                _type = self.protocol.lookup_mode_type(mode,channel_uid)
+                
+                if tools.contains_any('BCD',_type) and mode not in db_channel_modes and value[0]:
+             
+                    remove_modes.append(mode)
+                    if value[1]:
+                        remove_values.append(value[1])
+                    
+            self.protocol.st_send_command('SVSMODE',[channel_uid.uid,'-' + ''.join(remove_modes),' '.join(remove_values)],self.factory.enforcer.uid)    
+                
+                
+            add_modes = []
+            add_values = []
+            
+            for mode, value in db_channel_modes.items():
+
+                _type = self.protocol.lookup_mode_type(mode,channel_uid)
+
+                if tools.contains_any('BCD',_type) and mode not in am:
+                    print value
+                    add_modes.append(mode)
+                    add_values.append(value)
+            
+            self.protocol.st_send_command('SVSMODE',[channel_uid.uid,'+' + ''.join(add_modes),' '.join(add_values)],self.factory.enforcer.uid)    
+                    
+                    
+                
         
         if self.factory.is_bursting:
             self.access_level_pass(users=channel_uid.users,channel=channel_uid)
