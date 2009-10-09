@@ -40,26 +40,26 @@ class CMDTypes(object):
 cmd = CMDTypes()
 
 
-def sr_reduce(args,required,ignore_reduce,ignore_gecos):
+def sr_reduce(args,required,ignore_reduce,reduce_gecos):
     if len(args) > required:
         if not ignore_reduce:
             raise ValueError('Given argument list contained more arguments than expected and you did not allow SR to reduce the arguments (set ignore_reduce = True on sr_assoc)')
             
-        if ignore_gecos:
-            _r = -1
+        if reduce_gecos:
+            _l = -1 - (len(args) - required)
+            _r = None
         else:
-            _r = 0
-        # Always start at -1 when reducing because we dont want
-        # to reduce any gecos / text into args. We subtract 1
-        # plus the difference between the length of args we have
-        # and the length we want (we always start by subtracting 
-        # 1 because we always want to reduce at least 1 value.
-        _l = _r - (1 + (len(args) - required))
-        
-        # Replace arguments _l:-1 with their values concatenated
-        # by a space.
-        args[_l:-1] = [' '.join(args[_l:-1])]
+            _l = 0 - (len(args) - required)
+            _r = -1
 
+        args[_l:_r] = [' '.join(args[_l:_r])]
+
+        print _l
+        
+        print _r
+        
+        
+        print args
 
     elif len(args) < required:
         if not ignore_reduce:
@@ -68,7 +68,7 @@ def sr_reduce(args,required,ignore_reduce,ignore_gecos):
         
         _l = required - len(args)
         
-        if ignore_gecos:
+        if reduce_gecos:
             gecos = args.pop()
             args.extend(itertools.repeat('',_l))
             args.append(gecos)
@@ -78,11 +78,11 @@ def sr_reduce(args,required,ignore_reduce,ignore_gecos):
     return args
     
     
-def sr_assoc(cmdtype,args,ignore_reduce=False,ignore_gecos=True):
+def sr_assoc(cmdtype,args,ignore_reduce=False,reduce_gecos=True):
     _sr_fields = cmdtype
     
 
-    args = sr_reduce(args,len(_sr_fields),ignore_reduce,ignore_gecos)
+    args = sr_reduce(args,len(_sr_fields),ignore_reduce,reduce_gecos)
     
 
     if len(args) != len(_sr_fields):

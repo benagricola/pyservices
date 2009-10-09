@@ -905,7 +905,9 @@ class SpanningTree12(LineOnlyReceiver):
         # Turn the list of fields and arguments into a keyed dictionary
         try:
             
-            _sr = sr_assoc(cmd.FMODE,args,ignore_reduce=True,ignore_gecos=False)
+            print args
+
+            _sr = sr_assoc(cmd.FMODE,args,ignore_reduce=True,reduce_gecos=True)
         except ValueError:
             self.log.log(cll.level.ERROR,'FMODE command returned wrong number of arguments.')
             self.st_send_error('FMODE command returned wrong number of arguments.')
@@ -943,7 +945,7 @@ class SpanningTree12(LineOnlyReceiver):
         # Turn the list of fields and arguments into a keyed dictionary
         try:
             
-            _sr = sr_assoc(cmd.MODE,args,ignore_reduce=True,ignore_gecos=False)
+            _sr = sr_assoc(cmd.MODE,args,ignore_reduce=True,reduce_gecos=True)
         except ValueError:
             self.log.log(cll.level.ERROR,'MODE command returned wrong number of arguments.')
             self.st_send_error('MODE command returned wrong number of arguments.')
@@ -982,7 +984,7 @@ class SpanningTree12(LineOnlyReceiver):
         # Turn the list of fields and arguments into a keyed dictionary
         try:
             
-            _sr = sr_assoc(cmd.PART,args,ignore_reduce=True,ignore_gecos=False)
+            _sr = sr_assoc(cmd.PART,args,ignore_reduce=True,reduce_gecos=True)
         except ValueError:
             self.log.log(cll.level.ERROR,'PART command returned wrong number of arguments.')
             self.st_send_error('PART command returned wrong number of arguments.')
@@ -1015,7 +1017,7 @@ class SpanningTree12(LineOnlyReceiver):
         # Turn the list of fields and arguments into a keyed dictionary
         try:
             
-            _sr = sr_assoc(cmd.KICK,args,ignore_reduce=True,ignore_gecos=False)
+            _sr = sr_assoc(cmd.KICK,args,ignore_reduce=True,reduce_gecos=True)
         except ValueError:
             self.log.log(cll.level.ERROR,'KICK command returned wrong number of arguments.')
             self.st_send_error('KICK command returned wrong number of arguments.')
@@ -1355,9 +1357,9 @@ class SpanningTree12(LineOnlyReceiver):
         prefix instead of args[0]).
         Returns the requested Unique() object or nothing.
     """
-    def lookup_uid(self,i_uid,allow_peer=False):
+    def lookup_uid(self,i_uid,allow_peer=True):
         if self.factory.peer_uid == i_uid and not allow_peer:
-            raise UserWarning('YOU MUST USE LOOKUP_PEER TO RETRIEVE THE PEER SERVER INFO')
+            raise UserWarning('YOU MUST USE LOOKUP_PEER TO RETRIEVE THE PEER SERVER INFO (%s)' % (i_uid))
 
         return self.factory.uid.get(i_uid)
 

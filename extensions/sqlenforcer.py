@@ -220,8 +220,8 @@ class SQLEnforcer(ext.BaseExtension):
             return True
         
         elif db_channel['type'] in ('BITMASK'):
-      
-            if (db_channel['bit'] & db_user['bitmask']) == db_channel['bit']:
+            if db_user['bitmask'] & db_channel['bit'] == db_channel['bit']:
+                
                 return True
             else:
                 return False
@@ -297,7 +297,7 @@ class SQLEnforcer(ext.BaseExtension):
        
         in_accesslist = self.channel_user_in_accesslist(db_user,db_channel,db_accesslist)
         
-        if (not in_accesslist or effective_level < db_channel['min_level']) and not public:
+        if (not in_accesslist or (effective_level < db_channel['min_level'] and db_channel['type'] not in ('BITMASK'))) and not public:
             cfg_bad_behaviour = self.factory.cfg.sqlextension.services.enforcer.bad_behaviour
             
             banmask = cfg_bad_behaviour.banmask % user.__dict__
@@ -328,30 +328,30 @@ class SQLEnforcer(ext.BaseExtension):
         elif db_user.get('id') == db_channel['founder_id']:
             # Remove nothing, user is the channel founder
             # so give founder mode + all trimmings 
-            give = modes_order
+            give = modes_order[0:3:2]
             
         elif effective_level >= db_channel['level_superop']:
             # Remove nothing, superops are awesome.
             # Give them all roles up to superop
-            give = modes_order[1:]
+            give = modes_order[1:3]
             take = modes_order[0]
             
         elif effective_level >= db_channel['level_op']:
             # Remove superops only (no-one should ever have this)
             # because SOP is given by services only
-            give = modes_order[2:]
+            give = modes_order[2]
             take = modes_order[:2]
 
             
         elif effective_level >= db_channel['level_halfop']:
             # Remove ops
-            give = modes_order[3:]
+            give = modes_order[3]
             take = modes_order[:3]
 
             
         elif effective_level >= db_channel['level_voice']:
             # Remove halfops
-            give = modes_order[4:]
+            give = modes_order[4]
             take = modes_order[:4]
         else:
             # Remove everything
@@ -420,16 +420,15 @@ class SQLEnforcer(ext.BaseExtension):
         def mode_deleted(*args,**kwargs):
             self.protocol.st_send_command('NOTICE',[source_uid],self.factory.enforcer.uid,'Channel %s mode %s removed value: %s'% (kwargs.get('chan'),kwargs.get('mode'),kwargs.get('value')))
             
-        user = self.protocol.lookup_uid(source_uid)
+
+        
+
         
         if not channel:
             self.log.log(cll.level.ERROR,'We received a hook FMODE but the channel could not be looked up by UID :wtc:')
             return
         
-        if not isinstance(user,uid.User):
-            self.log.log(cll.level.ERROR,'We received a hook FMODE but the user could not be looked up by UID :wtc:')
-            return
-            
+
         db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,channel.uid)
             
         if not db_channel:
@@ -471,8 +470,10 @@ class SQLEnforcer(ext.BaseExtension):
                 # We only want to enforce non-type-A ("Mode that adds or removes
                 # a nick or address to a list") modes because bans should be 
                 # handled by channel ops or access lists.
+                user = self.protocol.lookup_uid(source_uid)
                 
                 if not isinstance(user,uid.User):
+                    # Looks like the mode origin is a server, try to enforce
                     self.enforce_channel_mode(channel=channel,db_modes=db_channel_modes,mode=mode,value=value) 
                 else:
                     db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
@@ -700,8 +701,9 @@ class SQLEnforcer(ext.BaseExtension):
                         db_channel_accesslist = yield self.factory.db.runInteraction(self.sqe.get_channel_accesslist,chan)
 
                         effective_level = self.channel_user_effective_level(db_user,db_channel,db_channel_accesslist)   
-                        
-                        if effective_level >= db_channel['min_level']:
+                        in_accesslist = self.channel_user_in_accesslist(db_user,db_channel,db_channel_accesslist)
+                          
+                        if in_accesslist or effective_level >= db_channel['min_level']:
                             self.invite_svsjoin(user,chan)
                         else:
                             self.protocol.st_send_command('NOTICE',[user.uid],self.factory.enforcer.uid,'Did not AJOIN you to %s because you do not have sufficient access privileges.' % (user.nick,chan))
@@ -880,7 +882,7 @@ class SQLEnforcer(ext.BaseExtension):
         if function in ('ADD'):
             db_channel_accesslist = yield self.factory.db.runInteraction(self.sqe.get_channel_accesslist,channel.uid)
             effective_level = self.channel_user_effective_level(db_user,db_channel,db_channel_accesslist)       
-            
+            in_accesslist = self.channel_user_in_accesslist(db_user,db_channel,db_channel_accesslist)
             
         cfg = self.factory.cfg.sqlextension
         
@@ -889,7 +891,7 @@ class SQLEnforcer(ext.BaseExtension):
                 duplicate_ajoin(channel_name)
                 return
             
-            if effective_level >= db_channel['min_level']:
+            if in_accesslist or effective_level >= db_channel['min_level']:
             
                 self.factory.db.runOperation \
                 (
