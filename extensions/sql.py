@@ -209,6 +209,7 @@ class SQLExtension(ext.BaseExtension):
                 " c.level_superop as level_superop,"
                 " c.level_settings as level_settings,"
                 " c.bit as bit,"
+                " c.name as name,"
                 " u.username as founder_name,"
                 " c.channel_mode_protection as channel_mode_protection,"
                 " c.user_mode_protection as user_mode_protection"
@@ -218,6 +219,30 @@ class SQLExtension(ext.BaseExtension):
             " WHERE c.name = %s LIMIT 1",name
         )
         return trans.fetchone()
+        
+    def get_channels_bits(self,trans):
+        cfg = self.factory.cfg.sqlextension
+        trans.execute \
+        (   " SELECT "
+                " c.id as id, c.founder_id as founder_id, c.topic as topic,"
+                " c.topic_protection as topic_protection, c.type as type," 
+                " c.min_level as min_level, c.level_voice as level_voice,"
+                " c.level_halfop as level_halfop, c.level_op as level_op,"
+                " c.level_superop as level_superop,"
+                " c.level_settings as level_settings,"
+                " c.bit as bit,"
+                " c.name as name,"
+                " u.username as founder_name,"
+                " c.channel_mode_protection as channel_mode_protection,"
+                " c.user_mode_protection as user_mode_protection"
+            " FROM " + cfg.table_prefix + "_channels c" 
+            " LEFT JOIN " + cfg.table_prefix + "_users u"
+            " ON (c.founder_id = u.id)"
+            " WHERE c.type = 'BITMASK'"
+        )
+        return dict([(x['name'],x) for x in trans.fetchall()])
+        
+        
     
     def get_channel_accesslist(self,trans,name):
         cfg = self.factory.cfg.sqlextension

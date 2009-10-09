@@ -690,14 +690,21 @@ class SQLEnforcer(ext.BaseExtension):
         ajchans = db_user.get('autojoin')
 
         if not self.factory.is_bursting:
+            bitmask_channels = yield self.factory.db.runInteraction(self.sqe.get_channels_bits)
+            
+            for name, chan in bitmask_channels.items():
+                if self.channel_user_in_accesslist(db_user,chan):
+                    self.invite_svsjoin(user,name)
+                
+                
             if ajchans:
                 for chan in ajchans.split(','):
                     # Get permissions for channel, if user has access force them to join
                     db_channel = yield self.factory.db.runInteraction(self.sqe.get_channel_details,chan)
                     
                     # If autojoin contains an invalid channel, skip it
-                    if db_channel:
-
+                    if db_channel and chan not in bitmask_channels:
+                   
                         db_channel_accesslist = yield self.factory.db.runInteraction(self.sqe.get_channel_accesslist,chan)
 
                         effective_level = self.channel_user_effective_level(db_user,db_channel,db_channel_accesslist)   
