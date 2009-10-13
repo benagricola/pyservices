@@ -432,8 +432,6 @@ class SQLEnforcer(ext.BaseExtension):
             modes_string += modes
             users_string += users
             
-        print modes_string
-        print users_string
         self.protocol.st_send_command('SVSMODE',[channel.uid,modes_string,users_string],self.factory.enforcer.uid)
     
     
@@ -644,7 +642,6 @@ class SQLEnforcer(ext.BaseExtension):
                 _type = self.protocol.lookup_mode_type(mode,channel_uid)
 
                 if tools.contains_any('BCD',_type) and mode not in am:
-                    print value
                     add_modes.append(mode)
                     add_values.append(value)
             
