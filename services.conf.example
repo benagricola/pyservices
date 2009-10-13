@@ -21,6 +21,7 @@ peer_server:
     send_password:  'send_password'
     rcv_password:   'receive_password'
     protocol:       $capabilities.protocol # References the below capabilities.protocol field
+    ssl:            True
 }
 
 console:

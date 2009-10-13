@@ -21,7 +21,9 @@ import os, getopt, logging, traceback, time, re, inspect, sys
 
 from pprint import pprint
 
-from twisted.internet import reactor, defer, stdio
+from twisted.internet import ssl, reactor, defer, stdio
+
+from OpenSSL import SSL
 
 import common.consoleinteraction as consoleinteraction
 import common.spanningtreefactory as spanningtreefactory
@@ -43,8 +45,14 @@ def initiate_spanningtree(cfg,config_file):
     factory = spanningtreefactory.SpanningTreeFactory(cfg,config_file)
     factory.server_version = '%s-%s (%s) %s :%s' % (__servicesname__,__version__,__author__,cfg.server.name,cfg.server.description)
 
-    connector = reactor.connectTCP(cfg.peer_server.address, cfg.peer_server.port, factory)
-
+    ssl_context = ssl.ClientContextFactory()
+    ssl_context.method = SSL.SSLv23_METHOD
+   
+    if cfg.peer_server.ssl:
+        connector = reactor.connectSSL(cfg.peer_server.address, cfg.peer_server.port, factory, ssl_context)
+    else:
+        connector = reactor.connectTCP(cfg.peer_server.address, cfg.peer_server.port, factory)
+        
     return (factory,connector)
 
     
