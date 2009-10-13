@@ -222,6 +222,7 @@ class SpanningTree12(LineOnlyReceiver):
         # If line is empty, log it as debug and do
         # not continue.
         if not s:
+            self.log.log(cll.level.VERBOSE,'Encountered empty line while parsing, ignored.')
             raise ValueError('Encountered empty line while parsing')
             
         prefix = ''
@@ -1307,7 +1308,7 @@ class SpanningTree12(LineOnlyReceiver):
             self.st_send_error('PRIVMSG command returned wrong number of arguments.')
             return False
         
-
+  
         if _sr.get('uid') in self.factory.pseudoclients:
             
             
@@ -1317,11 +1318,7 @@ class SpanningTree12(LineOnlyReceiver):
                 cprefix = _sr.get('message')
                 _sr['message'] = ''
                 
-        
-            
-                
-            if not self.execute_hook(name='ps_chanmsg_%s' % (cprefix.lower()),source_uid=prefix,command=cprefix,message=_sr.get('message'),pseudoclient_uid=_sr.get('uid')) \
-            and not self.execute_hook(name='ps_privmsg_%s' % (cprefix.lower()),source_uid=prefix,command=cprefix,message=_sr.get('message'),pseudoclient_uid=_sr.get('uid')):
+            if not self.execute_hook(name='ps_privmsg_%s' % (cprefix.lower()),source_uid=prefix,command=cprefix,message=_sr.get('message'),pseudoclient_uid=_sr.get('uid')):
                 self.st_receive_privmsg_unknown(source=prefix,command=cprefix,message=_sr.get('message'),pseudoclient_uid=_sr.get('uid'))
         
         else:
