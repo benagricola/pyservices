@@ -281,7 +281,7 @@ class SQLEnforcer(ext.BaseExtension):
         access level or their access level on that channel,
         depending on the channel type.
     """
-    def enforce_user_modes(self,user,db_user,channel,db_channel,db_accesslist):
+    def enforce_user_modes(self,user,db_user,channel,db_channel,db_accesslist,multiple_user_pass = True):
         cfg_enforcer = self.factory.cfg.sqlextension.services.enforcer
 
         
@@ -312,8 +312,10 @@ class SQLEnforcer(ext.BaseExtension):
                 
                 self.log.log(cll.level.DEBUG,'Banned %s on %s (%ss Access denied timeban)' % (banmask,channel.uid,cfg_enforcer.ban_accessdenied_expiry))
             
-                        
-            return
+            if multiple_user_pass:            
+                return None
+            else:
+                return
 
         give_user = ''
         take_user = ''
@@ -367,8 +369,12 @@ class SQLEnforcer(ext.BaseExtension):
             
         
         # Send the mode change
-        self.protocol.st_send_command('SVSMODE',[channel.uid,give + take,give_user,take_user],self.factory.enforcer.uid)
-        
+        if not multiple_user_pass:
+            self.protocol.st_send_command('SVSMODE',[channel.uid,give + take,give_user,take_user],self.factory.enforcer.uid)
+            return None
+        else:
+            return [give + take,' '.join([give_user,take_user])]
+            
         
     @defer.inlineCallbacks
     def access_level_pass(self,*args,**kwargs):
@@ -392,6 +398,7 @@ class SQLEnforcer(ext.BaseExtension):
         
             db_users = yield self.factory.db.runInteraction(self.sqe.get_users_complete,user_nicks)
             
+            enforce_modes_list = []
             for uitem in users.values():
                 user = uitem.get('instance')
                 modes = uitem.get('modes')
@@ -401,14 +408,35 @@ class SQLEnforcer(ext.BaseExtension):
                 if not db_user:
                     self.kill_user(user.nick)
                     
-                self.enforce_user_modes(user,db_user,channel,db_channel,db_accesslist)
-                
+                enforce_modes_list.append(self.enforce_user_modes(user,db_user,channel,db_channel,db_accesslist))
+            self.service_mode_list(channel,enforce_modes_list)
+        
         else:   
             user = users
             db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
-            self.enforce_user_modes(user,db_user,channel,db_channel,db_accesslist)
+            self.enforce_user_modes(user,db_user,channel,db_channel,db_accesslist,False) # Make sure this is called as a single user pass so it executes the SVSMODE command directly
+            
             
 
+    """
+        This command executes a list of user modes.
+        To be enforced in one go by SVSMODE.
+    """
+    def service_mode_list(self,channel,mode_list):
+        if mode_list is None:
+            return
+            
+        modes_string = ''
+        users_string = ''
+        for modes, users in mode_list:
+            modes_string += modes
+            users_string += users
+            
+        print modes_string
+        print users_string
+        self.protocol.st_send_command('SVSMODE',[channel.uid,modes_string,users_string],self.factory.enforcer.uid)
+    
+    
     """
         This command is hooked when a mode is set.
     """
@@ -459,7 +487,7 @@ class SQLEnforcer(ext.BaseExtension):
                 if not db_user:
                     self.kill_user(param.nick)
                     
-                self.enforce_user_modes(param,db_user,channel,db_channel,db_accesslist)
+                self.enforce_user_modes(param,db_user,channel,db_channel,db_accesslist,False)
                 
             elif cmp and tools.contains_any('BCD',_type):
                 # Mode was a channel mode, and channel mode protection is on.
@@ -639,7 +667,7 @@ class SQLEnforcer(ext.BaseExtension):
                 if not db_user:
                     self.kill_user(user_uid.nick)
                     return
-                self.enforce_user_modes(user_uid,db_user,channel_uid,db_channel,db_accesslist)
+                self.enforce_user_modes(user_uid,db_user,channel_uid,db_channel,db_accesslist,False)
         
 
 
@@ -1868,7 +1896,8 @@ class SQLEnforcer(ext.BaseExtension):
                 return
             
             if function == 'ADD':
-                if value >= effective_level:
+
+                if value >= effective_level and db_user['id'] != db_channel['founder_id']:
                     too_high()
                     return
                 self.factory.db.runOperation \
