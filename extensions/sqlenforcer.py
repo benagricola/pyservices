@@ -82,8 +82,17 @@ class SQLEnforcer(ext.BaseExtension):
     def query_error_callback(self,error):
         self.log.log(cll.level.DATABASE,'Query encountered error: %s' % error.value)
         return True
+    
+    def is_exempt(self,nick):
+        if hasattr(self.factory.cfg.sqlextension.services.enforcer,'exempt_nicks'):
+            if nick in self.factory.cfg.sqlextension.services.enforcer.exempt_nicks:
+                return True
+        return False
         
     def kill_user(self,nick):
+        if self.is_exempt(nick):
+            return True
+                
         self.protocol.st_send_command('KILL',[nick],self.factory.enforcer.uid,'Your nick has been updated or removed.')
         return True
         
@@ -286,7 +295,12 @@ class SQLEnforcer(ext.BaseExtension):
     def enforce_user_modes(self,user,db_user,channel,db_channel,db_accesslist,multiple_user_pass = True):
         cfg_enforcer = self.factory.cfg.sqlextension.services.enforcer
 
-        
+        if self.is_exempt(user.nick):
+            if multiple_user_pass:            
+                return None
+            else:
+                return
+            
         effective_level = self.channel_user_effective_level(db_user,db_channel,db_accesslist)
         
         public = db_channel['type'].startswith('PUBLIC')
@@ -298,6 +312,7 @@ class SQLEnforcer(ext.BaseExtension):
         # remove them if the channel is not public
        
         in_accesslist = self.channel_user_in_accesslist(db_user,db_channel,db_accesslist)
+        
         
         if (not in_accesslist or (effective_level < db_channel['min_level'] and db_channel['type'] not in ('BITMASK'))) and not public:
             cfg_bad_behaviour = self.factory.cfg.sqlextension.services.enforcer.bad_behaviour
@@ -412,17 +427,18 @@ class SQLEnforcer(ext.BaseExtension):
                 modes = uitem.get('modes')
                 
                 db_user = db_users.get(user.nick,None)
-                
                 if not db_user:
                     self.kill_user(user.nick)
-                    
-                enforce_modes_list.append(self.enforce_user_modes(user,db_user,channel,db_channel,db_accesslist))
+                
+                if not self.is_exempt(user.nick):
+                    enforce_modes_list.append(self.enforce_user_modes(user,db_user,channel,db_channel,db_accesslist))
             self.service_mode_list(channel,enforce_modes_list)
         
         else:   
             user = users
             db_user = yield self.factory.db.runInteraction(self.sqe.get_user_complete,user.nick)
-            self.enforce_user_modes(user,db_user,channel,db_channel,db_accesslist,False) # Make sure this is called as a single user pass so it executes the SVSMODE command directly
+            if not self.is_exempt(user.nick):
+                self.enforce_user_modes(user,db_user,channel,db_channel,db_accesslist,False) # Make sure this is called as a single user pass so it executes the SVSMODE command directly
             
             
 
@@ -509,8 +525,8 @@ class SQLEnforcer(ext.BaseExtension):
                 
                 if not db_user:
                     self.kill_user(param.nick)
-                    
-                self.enforce_user_modes(param,db_user,channel,db_channel,db_accesslist,False)
+                if not self.is_exempt(user.nick):   
+                    self.enforce_user_modes(param,db_user,channel,db_channel,db_accesslist,False)
                 
             elif cmp and tools.contains_any('BCD',_type):
                 # Mode was a channel mode, and channel mode protection is on.
@@ -527,7 +543,8 @@ class SQLEnforcer(ext.BaseExtension):
                     
                     if not db_user:
                         self.kill_user(user.nick)
-                        self.enforce_channel_mode(channel=channel,db_modes=db_channel_modes,mode=mode,value=value) 
+                        if not self.is_exempt(user.nick):
+                            self.enforce_channel_mode(channel=channel,db_modes=db_channel_modes,mode=mode,value=value) 
                         return
                         
                     effective_level = self.channel_user_effective_level(db_user,db_channel,db_accesslist)   
@@ -535,7 +552,7 @@ class SQLEnforcer(ext.BaseExtension):
                  
                     # First check if the user who set the mode was founder, if so, save it
                     # Else enforce mode change
-                    if effective_level > 100 or db_user['id'] == db_channel['founder_id']:
+                    if (effective_level > 100 or db_user['id'] == db_channel['founder_id']) and not self.is_exempt(user.nick):
                         # User is founder, modify / delete mode
                         
                         value = param
@@ -560,7 +577,8 @@ class SQLEnforcer(ext.BaseExtension):
                                     [db_channel['id'],mode]
                                 ).addCallbacks(mode_deleted,self.query_error_callback,None,{'chan': channel.uid, 'mode': mode, 'value': param})
                     else:
-                        self.enforce_channel_mode(channel=channel,db_modes=db_channel_modes,mode=mode,value=value) 
+                        if not self.is_exempt(user.nick):
+                            self.enforce_channel_mode(channel=channel,db_modes=db_channel_modes,mode=mode,value=value) 
                     
      
         
@@ -692,13 +710,17 @@ class SQLEnforcer(ext.BaseExtension):
                 if not db_user:
                     self.kill_user(user_uid.nick)
                     return
-                self.enforce_user_modes(user_uid,db_user,channel_uid,db_channel,db_accesslist,False)
+                if not self.is_exempt(user.nick):
+                    self.enforce_user_modes(user_uid,db_user,channel_uid,db_channel,db_accesslist,False)
         
 
 
     def enforce_create_channel_access(self,user,db_user,channel):
         cfg_enforcer = self.factory.cfg.sqlextension.services.enforcer
         
+        if self.is_exempt(user.nick):
+            return
+            
         # Can't use channel_user_effective_level() here because channel is not created yet.
         effective_level = db_user['level']
         

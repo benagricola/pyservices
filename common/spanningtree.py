@@ -222,7 +222,6 @@ class SpanningTree12(LineOnlyReceiver):
         # If line is empty, log it as debug and do
         # not continue.
         if not s:
-            self.log.log(cll.level.VERBOSE,'Encountered empty line while parsing, ignored.')
             raise ValueError('Encountered empty line while parsing')
             
         prefix = ''
