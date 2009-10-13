@@ -525,7 +525,7 @@ class SQLEnforcer(ext.BaseExtension):
                 
                 if not db_user:
                     self.kill_user(param.nick)
-                if not self.is_exempt(user.nick):   
+                if not self.is_exempt(param.nick):   
                     self.enforce_user_modes(param,db_user,channel,db_channel,db_accesslist,False)
                 
             elif cmp and tools.contains_any('BCD',_type):
@@ -710,7 +710,7 @@ class SQLEnforcer(ext.BaseExtension):
                 if not db_user:
                     self.kill_user(user_uid.nick)
                     return
-                if not self.is_exempt(user.nick):
+                if not self.is_exempt(user_uid.nick):
                     self.enforce_user_modes(user_uid,db_user,channel_uid,db_channel,db_accesslist,False)
         
 
