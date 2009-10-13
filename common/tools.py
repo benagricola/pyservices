@@ -13,7 +13,6 @@
 
 import hashlib, string, random, sys, os, re, imp, inspect
 
-
 """
     Generates a valid HMAC challenge string using 
     random.sample on a list of allowed characters.
@@ -198,9 +197,14 @@ def get_docstring(obj,prefix='',cmdname=''):
         return inspect.getdoc(meth)
     else:
         return False
-    
-       
-    
+  
+""" 
+    Splits a list into equal length lists with size n
+"""
+def chunks(l, n):  
+    for i in xrange(0, len(l), n):
+            yield l[i:i+n]
+   
 """
     Returns all functions in a given class,
     possibly matching a prefix.

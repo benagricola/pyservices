@@ -13,6 +13,8 @@
 
 from datetime import datetime as datetime
 
+import itertools
+
 import common.log_levels as cll
 import common.tools as tools
 import common.ext as ext
@@ -359,21 +361,27 @@ class SQLEnforcer(ext.BaseExtension):
             # Remove everything
             take = modes_order
         
-        if give:
-            give_user = ' '.join([user.uid] * len(give))
-            give = '+' + give
+        # Make sure we only give or take the required modes so we don't spam
+        give = ''.join([mode for mode in give if not channel.user_has_mode(user,mode)])
+        take = ''.join([mode for mode in take if channel.user_has_mode(user,mode)])
+                
+        if not multiple_user_pass:
+            if give:
+                give_user = ' '.join([user.uid] * len(give))
+                give = '+' + give
 
-        if take:
-            take_user = ' '.join([user.uid] * len(take))
-            take = '-' + take
+            if take:
+                take_user = ' '.join([user.uid] * len(take))
+                take = '-' + take
             
         
         # Send the mode change
         if not multiple_user_pass:
+            
             self.protocol.st_send_command('SVSMODE',[channel.uid,give + take,give_user,take_user],self.factory.enforcer.uid)
             return None
         else:
-            return [give + take,' '.join([give_user,take_user])]
+            return [give,take,user]
             
         
     @defer.inlineCallbacks
@@ -426,14 +434,31 @@ class SQLEnforcer(ext.BaseExtension):
         if mode_list is None:
             return
             
-        modes_string = ''
-        users_string = ''
-        for modes, users in mode_list:
-            modes_string += modes
-            users_string += users
-            
-        self.protocol.st_send_command('SVSMODE',[channel.uid,modes_string,users_string],self.factory.enforcer.uid)
-    
+       
+        max_modes = self.factory.capabilities['maxmodes']
+        g_list = []
+        t_list = []
+
+        for give_modes, take_modes, user in mode_list:
+            g_list.extend(zip(list(give_modes),itertools.repeat(user.uid,len(give_modes))))
+            t_list.extend(zip(list(take_modes),itertools.repeat(user.uid,len(take_modes))))
+
+        g_list_chunk = (True,tools.chunks(g_list, max_modes))
+        t_list_chunk = (False,tools.chunks(t_list, max_modes))
+        
+
+        for x_give, x_list in (g_list_chunk,t_list_chunk):
+            for item in x_list:
+                modes = ''.join([rec[0] for rec in item])
+                values = ' '.join([rec[1] for rec in item])
+                
+                ml = '+' if x_give else '-'
+
+                self.protocol.st_send_command('SVSMODE',[channel.uid,ml + modes,values],self.factory.enforcer.uid)
+                
+       
+
+        
     
     """
         This command is hooked when a mode is set.
@@ -550,7 +575,8 @@ class SQLEnforcer(ext.BaseExtension):
                 ms = '+'
             else:
                 ms = '-'
-            self.protocol.st_send_command('SVSMODE',[channel.uid,ms + mode,value],self.factory.enforcer.uid)
+            if value != '':
+                self.protocol.st_send_command('SVSMODE',[channel.uid,ms + mode,value],self.factory.enforcer.uid)
     
     
         give,param = value
@@ -630,8 +656,9 @@ class SQLEnforcer(ext.BaseExtension):
                     remove_modes.append(mode)
                     if value[1]:
                         remove_values.append(value[1])
-                    
-            self.protocol.st_send_command('SVSMODE',[channel_uid.uid,'-' + ''.join(remove_modes),' '.join(remove_values)],self.factory.enforcer.uid)    
+            
+            if len(remove_modes) > 0:
+                self.protocol.st_send_command('SVSMODE',[channel_uid.uid,'-' + ''.join(remove_modes),' '.join(remove_values)],self.factory.enforcer.uid)    
                 
                 
             add_modes = []
@@ -644,8 +671,9 @@ class SQLEnforcer(ext.BaseExtension):
                 if tools.contains_any('BCD',_type) and mode not in am:
                     add_modes.append(mode)
                     add_values.append(value)
-            
-            self.protocol.st_send_command('SVSMODE',[channel_uid.uid,'+' + ''.join(add_modes),' '.join(add_values)],self.factory.enforcer.uid)    
+                    
+            if len(add_modes) > 0:
+                self.protocol.st_send_command('SVSMODE',[channel_uid.uid,'+' + ''.join(add_modes),' '.join(add_values)],self.factory.enforcer.uid)    
                     
                     
                 
