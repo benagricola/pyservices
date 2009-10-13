@@ -33,6 +33,7 @@ class CMDTypes(object):
         sr_fields['MODE']       = ['target','modes','parameters']
         sr_fields['PART']       = ['channel','reason']
         sr_fields['KICK']       = ['channel','user','reason']
+        sr_fields['SQUIT']       = ['server','reason']
         sr_fields['QUIT']       = ['reason']
         
         self.__dict__ = sr_fields

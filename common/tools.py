@@ -11,7 +11,7 @@
     
 """
 
-import hashlib, string, random, sys, os, re, imp, inspect
+import hashlib, string, random, sys, os, re, imp, inspect, time, math
 
 """
     Generates a valid HMAC challenge string using 
@@ -80,12 +80,19 @@ class UIDGenerator:
     
     
     @classmethod
-    def generate(cls):
-        if not hasattr(cls,'uid'):
-            cls.uid = 0
+    def generate(cls,list_in_use):
         _chars = list(string.ascii_uppercase + string.digits)
+        
+        if not hasattr(cls,'uid'):
+                cls.uid = 0
+        
+        
         v = cls.baseconvert(cls.uid)
         cls.uid += 1
+        while v in list_in_use.keys():
+            v = cls.baseconvert(cls.uid)
+            cls.uid += 1
+            
         return v
         
 """
@@ -197,7 +204,13 @@ def get_docstring(obj,prefix='',cmdname=''):
         return inspect.getdoc(meth)
     else:
         return False
-  
+
+"""
+    Generates a timestamp for operations that require it
+"""
+def timestamp():  
+    return int(math.floor(time.time()))
+
 """ 
     Splits a list into equal length lists with size n
 """

@@ -529,6 +529,7 @@ class SpanningTree12(LineOnlyReceiver):
         # update since it already exists, but is not an issue).
         self.add_uid(server)
             
+        self.factory.server_names[server.name] = server
         # If password argument is not an asterisk, the server is a peer and 
         # being added during connect, so save its' uid as factory.peer_uid
         # for use in lookup_peer.
@@ -587,7 +588,7 @@ class SpanningTree12(LineOnlyReceiver):
     """
     def st_send_burst(self):
         self.log.log(cll.level.INFO,'Attempting outbound network burst')
-        self.st_send_command('BURST',int(time.time()), self.factory.cfg.server.sid)
+        self.st_send_command('BURST',tools.timestamp(), self.factory.cfg.server.sid)
         self.st_send_command('VERSION',None, self.factory.cfg.server.name,self.factory.server_version)
 
         self.execute_hook()
@@ -609,7 +610,7 @@ class SpanningTree12(LineOnlyReceiver):
         Also creates and adds a User() UID for this client to our UID list.
     """	
     def st_add_pseudoclient(self,nick,host,ident,modes,gecos,client_handler):
-        _t = int(time.time())
+        _t = tools.timestamp()
         
         try:
             _modes, _params = modes.split(' ')
@@ -617,7 +618,7 @@ class SpanningTree12(LineOnlyReceiver):
             _modes = modes
             _params = ''
         
-        _uid = tools.UIDGenerator.generate()
+        _uid = self.factory.cfg.server.sid + tools.UIDGenerator.generate(self.factory.uid)
         _user = uid.User(_uid)
         _user.nick = nick
         _user.hostname = 'localhost'
@@ -640,7 +641,7 @@ class SpanningTree12(LineOnlyReceiver):
         by generating a UID command from a given User() item
     """
     def st_send_uid_from_user(self,user):
-        _t = int(time.time())
+        _t = tools.timestamp()
         _modes, _params = user.modes_return_parsed()
         self.st_send_command('UID',[user.uid,_t,user.nick,user.hostname,user.displayed_hostname,user.ident,user.ip,user.signed_on,_modes,_params], self.factory.cfg.server.sid, user.gecos)
     
@@ -679,12 +680,57 @@ class SpanningTree12(LineOnlyReceiver):
     def st_receive_version(self,prefix,args):
     
             server = self.lookup_uid(prefix,allow_peer=True)
-            server.version = ''.join(args).split(' :')
-    
-            self.execute_hook(version=server.version)
+            
+            if server and self.factory.peer_uid == prefix:
+                server.version = ''.join(args).split(' :')
+                self.execute_hook(version=server.version)
+            elif server:
+                self.execute_hook(version=''.join(args).split(' :'))
+                
             return True
     
     
+    """
+        Called when we receive an SQUIT, this removes
+        all users on the server from our UID db and 
+        then removes the server itself.
+        
+        http://wiki.inspircd.org/InspIRCd_Spanning_Tree_1.2/SQUIT
+        
+    """
+    def st_receive_squit(self,prefix,args):
+        try:
+            _sr = sr_assoc(cmd.SQUIT,args,ignore_reduce=True)
+        except ValueError:
+            self.log.log(cll.level.ERROR,'SQUIT command returned wrong number of arguments.')
+            self.st_send_error('SQUIT command returned wrong number of arguments.')
+            return False
+
+            
+        
+        
+        
+        if _sr['server'] in self.factory.server_names:
+            _i = 0
+            server = self.factory.server_names[_sr['server']]
+            for user in server.users:
+                for name, channel in user.channels.iteritems():
+            
+                    if user.uid in channel.users:
+                        del channel.users[user.uid]
+                        
+                _i += 1        
+                del self.factory.uid[user.uid]
+                del user
+               
+            self.log.log(cll.level.VERBOSE, 'SQUIT: Removed %s users from server %s' %(_i,server.uid))
+            del self.factory.uid[server.uid]
+            del self.factory.server_names[server.name]
+            del server          
+                    
+            
+            
+                
     """
         Called when we receive a network burst UID
         command, this creates / updates a User 
@@ -729,7 +775,11 @@ class SpanningTree12(LineOnlyReceiver):
                 
             self.execute_hook(user=user)
             
-            # Attempt to add the server to the UID dict (this will log an error on 
+            server = self.lookup_uid(prefix)
+            if server:
+                server.users.append(user)
+            
+            # Attempt to add the user to the UID dict (this will log an error on 
             # update since it already exists, but is not an issue).
             self.add_uid(user)
         
@@ -805,7 +855,7 @@ class SpanningTree12(LineOnlyReceiver):
         
     """		
     def st_receive_fjoin(self,prefix,args):
-        _t = int(time.time())
+        _t = tools.timestamp()
         
     
         # Turn the list of fields and arguments into a keyed dictionary
@@ -1036,7 +1086,8 @@ class SpanningTree12(LineOnlyReceiver):
         return True
         
         
-        
+    
+    
     """
         Called when we receive a QUIT
         command, this removes a user from
@@ -1236,7 +1287,8 @@ class SpanningTree12(LineOnlyReceiver):
                 self.factory.connected = True
                 self.st_send_ping()
                 self.log.log(cll.level.INFO,'Servers synchronized & connected successfully')
-                self.execute_hook(prefix,args)
+            
+            self.execute_hook(prefix,args)
         return True
     
     
@@ -1268,7 +1320,9 @@ class SpanningTree12(LineOnlyReceiver):
                 
         
             
-            if not self.execute_hook(name='ps_privmsg_%s' % (cprefix.lower()),source_uid=prefix,command=cprefix,message=_sr.get('message'),pseudoclient_uid=_sr.get('uid')):
+                
+            if not self.execute_hook(name='ps_chanmsg_%s' % (cprefix.lower()),source_uid=prefix,command=cprefix,message=_sr.get('message'),pseudoclient_uid=_sr.get('uid')) \
+            and not self.execute_hook(name='ps_privmsg_%s' % (cprefix.lower()),source_uid=prefix,command=cprefix,message=_sr.get('message'),pseudoclient_uid=_sr.get('uid')):
                 self.st_receive_privmsg_unknown(source=prefix,command=cprefix,message=_sr.get('message'),pseudoclient_uid=_sr.get('uid'))
         
         else:

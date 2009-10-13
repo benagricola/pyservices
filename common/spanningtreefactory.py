@@ -89,6 +89,9 @@ class SpanningTreeFactory(ReconnectingClientFactory):
         # Setup a User / Server UID lookup table 
         self.uid = {}
         
+        # A map of server names to UID's
+        self.server_names = {}
+        
         # Clear the list of pseudoclients
         self.pseudoclients = {}
         

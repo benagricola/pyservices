@@ -12,6 +12,7 @@
 """
 
 from datetime import datetime as datetime
+import common.tools as tools
 
 class Unique(object):
     
@@ -51,12 +52,16 @@ class Server(Unique):
         self.password = ''
         self.description = ''
         self.hops = 0
-    
+        self.users = []
+        
+        
 class User(Unique):
     
 
     def __init__(self,uid):
         Unique.__init__(self,uid) 
+        
+        
         self.nick = ''
         
         self.hostname = ''
@@ -69,7 +74,7 @@ class User(Unique):
         
         self.gecos = ''
         
-        self._timestamp = datetime.today()
+        self._timestamp = tools.timestamp()
         self._metadata = {}
         self._channels = {}
     
@@ -80,7 +85,7 @@ class User(Unique):
         self._timestamp = datetime.fromtimestamp(int(timestamp))
     
     def timestamp_del(self):
-        self.timestamp = datetime.today()
+        self.timestamp = tools.timestamp()
         
     timestamp = property(timestamp_get,timestamp_set,timestamp_del)
     
@@ -135,7 +140,7 @@ class Channel(Unique):
         
         self.access = {}
         
-        self._timestamp = datetime.today()
+        self._timestamp = tools.timestamp()
         
         self._users = {}
     
@@ -146,7 +151,7 @@ class Channel(Unique):
         self._timestamp = datetime.fromtimestamp(int(timestamp))
     
     def timestamp_del(self):
-        self.timestamp = datetime.today()
+        self.timestamp = tools.timestamp()
         
     timestamp = property(timestamp_get,timestamp_set,timestamp_del)
     
