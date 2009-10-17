@@ -33,8 +33,6 @@ class Daemon(object):
         self.name = name
         
     def main(self):
-        signal.signal(signal.SIGHUP, self.reload_handler)
-
         self.parse_options()
         action = self.options.action
         
@@ -110,9 +108,9 @@ class Daemon(object):
 
     def add_signal_handlers(self):
         """Register the sigterm handler"""
-        
+            
         signal.signal(signal.SIGTERM, self.on_sigterm)
-
+        signal.signal(signal.SIGHUP, self.reload_handler)
         
     def setup_run_user(self):
         """Override to perform setup tasks with initial user privs"""
