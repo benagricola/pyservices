@@ -70,7 +70,7 @@ class SQLEnforcer(ext.BaseExtension):
         query completed successfully.
     """
     def query_update_callback(self,*args,**kwargs):
-        self.log.log(cll.level.DATABASE,'Query OK')
+        #self.log.log(cll.level.DATABASE,'Query OK')
         return True
     
     
@@ -218,20 +218,20 @@ class SQLEnforcer(ext.BaseExtension):
         This function returns a boolean depending on if a user is on a channel
         access list or not.
     """
-    def channel_user_in_accesslist(self,db_user,db_channel,db_accesslist = {}):
+    def channel_user_in_accesslist(self,db_user,db_channel,db_accesslist = {},allow_admin = True):
         public = db_channel['type'].startswith('PUBLIC')
          
         if not db_user:
             return False
     
-        elif db_user['level'] == 9001:
+        elif db_user['level'] == 9001 and allow_admin:
             return True
             
         elif db_user['id'] == db_channel['founder_id']:
             return True
         
         elif db_channel['type'] in ('BITMASK'):
-            if db_user['bitmask'] & db_channel['bit'] == db_channel['bit']:
+            if db_user['bitmask'] & db_channel['bit'] > 0:
                 
                 return True
             else:
@@ -276,6 +276,9 @@ class SQLEnforcer(ext.BaseExtension):
                 return db_accesslist[db_user['id']].get('access_level',-1)
             else:
                 effective_level = -1   
+                
+            if effective_level == -1 and db_channel['type'] in ('BITMASK'):
+                effective_level = db_user['level']
                 
         else:
              effective_level = db_user['level']
@@ -793,7 +796,7 @@ class SQLEnforcer(ext.BaseExtension):
             bitmask_channels = yield self.factory.db.runInteraction(self.sqe.get_channels_bits)
             
             for name, chan in bitmask_channels.items():
-                if self.channel_user_in_accesslist(db_user,chan):
+                if self.channel_user_in_accesslist(db_user,chan,allow_admin = False):
                     self.invite_svsjoin(user,name)
                 
                 

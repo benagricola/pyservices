@@ -33,6 +33,8 @@ class Daemon(object):
         self.name = name
         
     def main(self):
+        signal.signal(signal.SIGHUP, self.reload_handler)
+
         self.parse_options()
         action = self.options.action
         
@@ -48,10 +50,16 @@ class Daemon(object):
         elif action == 'restart':
             self.stop(True)
             self.start()
+        elif action == 'rehash':
+            self.rehash()
         else:
             raise ValueError(action)
 
     
+    def reload_handler(self,signum,frame):
+        self.parse_config()
+        
+        
     def parse_config(self):
         """ 
             Override this with the applications' favoured way
@@ -75,6 +83,7 @@ class Daemon(object):
         p = optparse.OptionParser('Typical Usage: %s start|stop|restart|rehash [options]' % (self.name))
         
         p.add_option('--start', dest='action',action='store_const', const='start', default='start',help='Start the daemon (the default action)')
+        p.add_option('--rehash', dest='action',action='store_const', const='rehash', default='start',help='Rehash the daemon')
         p.add_option('--stop', dest='action',action='store_const', const='stop', default='start',help='Stop the daemon')
         p.add_option('-c', dest='config_filename',action='store', default=self.default_config,help='Specify alternate configuration file name')
         p.add_option('-n', '--nodaemon', dest='daemonize',action='store_false', default=True,help='Run in the foreground')
@@ -82,7 +91,7 @@ class Daemon(object):
         self.options, self.args = p.parse_args()
         
         try:
-            if self.args[0].lower() in ('start','stop','restart'):
+            if self.args[0].lower() in ('start','stop','restart','rehash'):
                 self.options.action = self.args[0].lower()
         
         except: 
@@ -170,7 +179,8 @@ class Daemon(object):
             except OSError, (code, message):
                 sys.exit("Cannot chown(%s, %d, %d): %s, %s" % (repr(fn), uid, gid, code, message))
 
-                
+     
+        
     """
         Check the pid file.
 
@@ -295,7 +305,26 @@ class Daemon(object):
     def switch_cwd(self):
         if self.root_dir:
            os.chdir(self.root_dir) 
-        
+    
+
+    """ 
+        Force config reload of remote process
+    """
+    def rehash(self):
+        if os.path.exists(self.pid_file):
+            try:
+                pid = int(open(self.pid_file).read().strip())
+            except ValueError:
+                msg = 'PID file %s contains a non-integer value' % self.pid_file
+                sys.exit(msg)
+            try:
+                os.kill(pid, signal.SIGHUP)
+                print "Rehashing..."
+            except OSError, (code, text):
+                if code == errno.ESRCH:
+                    # The pid doesn't exist, so remove the stale pidfile.
+                    os.remove(self.pid_file)
+            
     """
         Initialize and run the daemon
     """

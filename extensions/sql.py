@@ -66,7 +66,7 @@ class SQLExtension(ext.BaseExtension):
         query completed successfully.
     """
     def query_update_callback(self,*args,**kwargs):
-        self.log.log(cll.level.DATABASE,'Query OK')
+        #self.log.log(cll.level.DATABASE,'Query OK')
         return True
     
     """ 

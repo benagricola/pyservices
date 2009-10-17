@@ -222,7 +222,6 @@ class SpanningTree12(LineOnlyReceiver):
         # If line is empty, log it as debug and do
         # not continue.
         if not s:
-            self.log.log(cll.level.VERBOSE,'Encountered empty line while parsing, ignored.')
             raise ValueError('Encountered empty line while parsing')
             
         prefix = ''
@@ -1352,9 +1351,9 @@ class SpanningTree12(LineOnlyReceiver):
         
         if cmdtext is not None:
             _buffer = ' :'.join([_buffer,cmdtext])
-            return self._sendLine(_buffer)
+            return self._sendLine(_buffer.encode('utf-8'))
         else:
-            return self._sendLine(_buffer)    
+            return self._sendLine(_buffer.encode('utf-8'))
         
 
     def _sendLine(self,_buffer):

@@ -17,7 +17,7 @@ __version__             = '0.55'
 __author__              = 'MaZ <maz@lawlr.us>'
 
 
-import os, getopt, logging, traceback, time, re, inspect, sys
+import os, getopt, logging, logging.handlers, traceback, time, re, inspect, sys
 
 from pprint import pprint
 
@@ -94,18 +94,25 @@ class ServicesDaemon(daemon.Daemon):
         # Set up file logging
         format_string = self.cfg.logging.file_format
         log_format = logging.Formatter(format_string)
-        logging.basicConfig(level=self.cfg.logging.debug_level, format=format_string, filename=self.log_file,filemode='a')
-
+        
+       
+        logging.getLogger('').setLevel(cll.level.NOTSET)
+        
+        rfh = logging.handlers.TimedRotatingFileHandler(self.log_file, self.cfg.logging.rotate_interval, self.cfg.logging.rotate, self.cfg.logging.keep_for)
+        rfh.setFormatter(log_format)
+        mh = logging.handlers.MemoryHandler(self.cfg.logging.log_buffer,cll.level.ERROR, rfh)
+        mh.setLevel(self.cfg.logging.file_debug_level)
         
         if not self.daemonize:
             # Set up console (+ colour) logging
             console_log = logging.StreamHandler()
-            console_log.setLevel(logging.DEBUG)
+            console_log.setLevel(self.cfg.logging.console_debug_level)
             color_format = colour.formatter_message(self.cfg.logging.console_format)
             formatter = colour.ColoredFormatter(color_format,self.cfg.logging.console_max_width,self.cfg.logging.console_multiline_offset)
             console_log.setFormatter(formatter)
             logging.getLogger('').addHandler(console_log)
 
+        logging.getLogger('').addHandler(mh)
         logging.getLogger('MAIN').log(cll.level.INFO,'Starting Up')
     
     
